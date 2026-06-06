@@ -2,7 +2,7 @@
  * @Author: Sid Li
  * @Date: 2026-06-04 17:00:25
  * @LastEditors: Sid Li
- * @LastEditTime: 2026-06-06 14:00:19
+ * @LastEditTime: 2026-06-06 14:11:06
  * @Description: 越疆机器人 在线模式完整API + 手势TCP控制
  */
 const { contextBridge, ipcRenderer } = require("electron");
@@ -60,14 +60,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   connectGesture: (ip, port) => ipcRenderer.invoke("gesture:connect", ip, port),
   disconnectGesture: () => ipcRenderer.invoke("gesture:disconnect"),
 
-  // 进入关节拖拽模式
-  startDragGesture: () => ipcRenderer.invoke("gesture:startDrag"),
-  // 退出拖拽模式
-  stopDragGesture: () => ipcRenderer.invoke("gesture:stopDrag"),
-
   // 监听手势数据
   onGestureData: (cb) => {
     ipcRenderer.on("gesture:data", (_, data) => cb(data));
     return () => ipcRenderer.removeAllListeners("gesture:data");
   },
+
+  // 进入关节拖拽模式
+  startDragRobot: () => ipcRenderer.invoke("robot:startDrag"),
+  // 退出拖拽模式
+  stopDragRobot: () => ipcRenderer.invoke("robot:stopDrag"),
 });

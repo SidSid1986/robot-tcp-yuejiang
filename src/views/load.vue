@@ -232,11 +232,12 @@ const clearErrRobot = async () => {
 
 // 进入关节拖拽模式
 const startDragGesture = async () => {
-  await window.electronAPI.startDragGesture();
+  console.log('进入拖拽');
+  await window.electronAPI.startDragRobot();
 };
 // 退出拖拽模式
 const stopDragGesture = async () => {
-  await window.electronAPI.stopDragGesture();
+  await window.electronAPI.stopDragRobot();
 };
 
 
@@ -503,7 +504,7 @@ const initScene = () => {
   // 加载机器人模型（保留）
   loadRobotModel();
 
-  // ========== 关键：取消注释，启动渲染循环 ==========
+  // ========== 启动渲染循环 ==========
   animate();
 };
 
@@ -1018,7 +1019,7 @@ const resetAllJoints = (positions) => {
   }
 };
 
-// 🆕 新增：专门更新末端执行器位置的函数
+// 专门更新末端执行器位置的函数
 const updateEndEffectorPosition = () => {
   if (!endEffector) {
     console.warn("endEffector 未定义，无法更新坐标");
@@ -1186,7 +1187,7 @@ onMounted(() => {
   offRobotFeedback = window.electronAPI?.onRobotFeedback?.((data) => {
     const qActualRad = data.qActual.map((deg) => deg * Math.PI / 180);
     jointArr.value = qActualRad;
-    console.log("页面收到实时关节角度:", data.qActual);
+    // console.log("页面收到实时关节角度:", data.qActual);
   });
   // 统一初始化场景（双架构通用）
   initScene();

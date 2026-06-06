@@ -2,7 +2,7 @@
  * @Author: Sid Li
  * @Date: 2026-06-04 17:00:25
  * @LastEditors: Sid Li
- * @LastEditTime: 2026-06-06 14:00:07
+ * @LastEditTime: 2026-06-06 14:57:29
  * @Description: 远程控制模式（可发MoveJoint）+ 连接 + 使能 + 回原点 + 扫描 + 急停
  */
 const { ipcMain } = require("electron");
@@ -327,20 +327,18 @@ function registerIPC() {
 }
 
 //StartDrag 机器人进入关节拖拽模式 立即指令
-ipcMain.handle("gesture:startDrag", () => {
-  if (gestureConnected) {
-    gestureSocket.write("StartDrag\r\n");
+ipcMain.handle("robot:startDrag", () => {
+  if (robotConnected) {
+    robotSocket.write("StartDrag()\r\n");
   }
 });
 
 //StopDrag 机器人退出拖拽模式 立即指令
-ipcMain.handle("gesture:stopDrag", () => {
-  if (gestureConnected) {
-    gestureSocket.write("StopDrag\r\n");
+ipcMain.handle("robot:stopDrag", () => {
+  if (robotConnected) {
+    robotSocket.write("StopDrag()\r\n");
   }
 });
-
-
 
 function startFeedback(ip) {
   if (feedbackSocket) feedbackSocket.destroy();
@@ -364,7 +362,7 @@ function startFeedback(ip) {
         qActual.push(Number(packet.readDoubleLE(432 + i * 8).toFixed(3)));
       }
 
-      console.log("实时关节角度 QActual:", qActual);
+      // console.log("实时关节角度 QActual:", qActual);
       getMainWindow()?.webContents.send("robot:feedback", {
         qActual,
         timestamp: Date.now(),

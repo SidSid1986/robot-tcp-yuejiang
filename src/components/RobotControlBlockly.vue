@@ -331,7 +331,7 @@ const smoothDemoLoopToTarget = async (targetPositions) => {
 //临时增加手势控制连接
 //手势连接
 const handleConnectGesture = async (gesture) => {
-  await window.electronAPI.connectGesture("192.168.6.100", 8888);
+  await window.electronAPI.connectGesture("192.168.6.123", 5000);
   window.electronAPI.onGestureData((data) => {
     console.log("收到手势：", data);
 
