@@ -328,6 +328,26 @@ const smoothDemoLoopToTarget = async (targetPositions) => {
   animate();
 };
 
+//临时增加手势控制连接
+//手势连接
+const handleConnectGesture = async (gesture) => {
+  await window.electronAPI.connectGesture("192.168.6.100", 8888);
+  window.electronAPI.onGestureData((data) => {
+    console.log("收到手势：", data);
+
+    // 解析后直接控制机械臂
+    // jointValues.value[0] = ...
+    // sendMoveToRobot(jointValues.value)
+  });
+};
+
+// 手势断断开
+const handleDisconnectGesture = () => {
+  window.electronAPI.disconnectGesture();
+};
+
+
+
 watch(
   () => props.jointArr,
   (newVal) => {
@@ -344,6 +364,14 @@ watch(
 );
 
 onMounted(() => {
+
+  // 连接手势 临时增加
+  handleConnectGesture();
+});
+
+onUnmounted(() => {
+  // 断开手势 临时增加
+  handleDisconnectGesture();
 });
 </script>
 

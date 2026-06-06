@@ -2,7 +2,7 @@
  * @Author: Sid Li
  * @Date: 2026-06-04 17:00:25
  * @LastEditors: Sid Li
- * @LastEditTime: 2026-06-06 10:33:20
+ * @LastEditTime: 2026-06-06 14:00:07
  * @Description: 远程控制模式（可发MoveJoint）+ 连接 + 使能 + 回原点 + 扫描 + 急停
  */
 const { ipcMain } = require("electron");
@@ -315,7 +315,7 @@ function registerIPC() {
   });
 
   // ==============================================
-  // ✅ 新增：断开手势 TCP
+  //  断开手势 TCP
   // ==============================================
   ipcMain.handle("gesture:disconnect", () => {
     if (gestureSocket) gestureSocket.destroy();
@@ -325,6 +325,22 @@ function registerIPC() {
     return true;
   });
 }
+
+//StartDrag 机器人进入关节拖拽模式 立即指令
+ipcMain.handle("gesture:startDrag", () => {
+  if (gestureConnected) {
+    gestureSocket.write("StartDrag\r\n");
+  }
+});
+
+//StopDrag 机器人退出拖拽模式 立即指令
+ipcMain.handle("gesture:stopDrag", () => {
+  if (gestureConnected) {
+    gestureSocket.write("StopDrag\r\n");
+  }
+});
+
+
 
 function startFeedback(ip) {
   if (feedbackSocket) feedbackSocket.destroy();

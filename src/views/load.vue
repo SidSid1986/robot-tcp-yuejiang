@@ -89,10 +89,14 @@
           <button @click="connectRobot">连接机器人</button>
           <button @click="disconnectRobot">断开</button>
           <!--在线模式锁定按钮-->
-          <button @click="setTcpMode" style="background:#ff9500;">锁定Tcp模式</button>
+          <!-- <button @click="setTcpMode" style="background:#ff9500;">锁定Tcp模式</button> -->
           <button @click="enableRobot" style="background:#00b42a;">上使能</button>
           <button @click="disableRobot" style="background:#ff4d4f;">下使能</button>
           <button @click="clearErrRobot" style="background:#ffa500;">清除故障</button>
+          <!-- 进入关节拖拽模式 -->
+          <button @click="startDragGesture" style="background:#00b42a;">进入拖拽</button>
+          <!-- 退出拖拽模式 -->
+          <button @click="stopDragGesture" style="background:#ff4d4f;">退出拖拽</button>
         </div>
         <div style="margin-top:6px;font-size:12px;color:#ccc;">连接状态：{{ robotStatus }}</div>
       </div>
@@ -161,11 +165,11 @@ const selectScanIp = (ip) => {
 
 
 // 切换TCP模式
-const setTcpMode = async () => {
-  if (!window.electronAPI) return;
-  await window.electronAPI.setTcpMode();
-  console.log("✅ 已切换为TCP远程模式");
-};
+// const setTcpMode = async () => {
+//   if (!window.electronAPI) return;
+//   await window.electronAPI.setTcpMode();
+//   console.log("✅ 已切换为TCP远程模式");
+// };
 // 连接机器人
 const connectRobot = async () => {
   if (!window.electronAPI) {
@@ -215,18 +219,26 @@ const enableRobot = async () => {
   console.log("✅ 已发送：上使能");
 };
 
-// 回原点
-
-
 // 下使能
 const disableRobot = async () => {
   if (!window.electronAPI) return;
   await window.electronAPI.disableRobot();
   console.log("已发送：下使能");
 };
+// 清除故障
 const clearErrRobot = async () => {
   await window.electronAPI.clearErrorRobot();
 };
+
+// 进入关节拖拽模式
+const startDragGesture = async () => {
+  await window.electronAPI.startDragGesture();
+};
+// 退出拖拽模式
+const stopDragGesture = async () => {
+  await window.electronAPI.stopDragGesture();
+};
+
 
 
 const jointArr = ref([]);
