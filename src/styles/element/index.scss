@@ -1,0 +1,85 @@
+/* 第一步：覆盖 Element Plus 变量（必须放在最前面） */
+@forward "element-plus/theme-chalk/src/common/var.scss" with (
+  $colors: (
+    "primary": (
+      "base": #585856,
+      "light-1": #666664,
+      "light-2": #747472,
+      "light-3": #828280,
+      "light-4": #90908e,
+      "light-5": #9e9e9c,
+      "light-6": #acacaa,
+      "light-7": #babab8,
+      "light-8": #c8c8c6,
+      "light-9": #ffffff,
+      "dark-1": #4a4a48,
+    ),
+  )
+);
+
+/* 第二步：重新编译 Element Plus 组件 */
+@use "element-plus/theme-chalk/src/button.scss" as *;
+@use "element-plus/theme-chalk/src/table.scss" as *;
+@use "element-plus/theme-chalk/src/pagination.scss" as *;
+@use "element-plus/theme-chalk/src/input.scss" as *;
+@use "element-plus/theme-chalk/src/select.scss" as *;
+@use "element-plus/theme-chalk/src/message-box.scss" as *;
+
+/* 第三步：强制全局覆盖 */
+:root {
+  // 主题主色 冷灰中性色
+  --el-color-primary: #585856 !important;
+  --el-color-primary-light-1: #666664 !important;
+  --el-color-primary-light-2: #747472 !important;
+  --el-color-primary-light-3: #828280 !important;
+  --el-color-primary-light-4: #90908e !important;
+  --el-color-primary-light-5: #9e9e9c !important;
+  --el-color-primary-light-6: #acacaa !important;
+  --el-color-primary-light-7: #babab8 !important;
+  --el-color-primary-light-8: #c8c8c6 !important;
+  --el-color-primary-light-9: #ffffff !important;
+  --el-color-primary-dark-1: #4a4a48 !important;
+
+  // 全局背景体系
+  --el-bg-color: #262624 !important;
+  --el-bg-color-page: #262624 !important;
+  --el-bg-color-overlay: #30302e !important;
+
+  // 边框线条色
+  --el-border-color: #3c3c3a !important;
+  --el-border-color-light: #464644 !important;
+
+  // 文字色系
+  --el-text-color-primary: #f0f0ee !important;
+  --el-text-color-regular: #d8d8d6 !important;
+  --el-text-color-secondary: #b4b4b2 !important;
+  --el-text-color-placeholder: #888886 !important;
+
+  // 主按钮样式
+  --el-button-primary-bg-color: #585856 !important;
+  --el-button-primary-border-color: #585856 !important;
+  --el-button-primary-hover-bg-color: #666664 !important;
+  --el-button-primary-hover-border-color: #666664 !important;
+  --el-button-primary-active-bg-color: #4a4a48 !important;
+  --el-button-primary-active-border-color: #4a4a48 !important;
+
+  // 默认按钮适配深色
+  --el-button-default-bg-color: #30302e !important;
+  --el-button-default-border-color: #464644 !important;
+  --el-button-default-text-color: #f0f0ee !important;
+}
+
+/* 弹窗按钮按压效果 */
+.el-message-box .el-button:active {
+  color: #ffffff !important;
+  border-color: #4a4a48 !important;
+  background-color: #4a4a48 !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* 第四步：自定义全局配色变量 */
+$base-dark: #262624;
+$mid-dark: #30302e;
+$main-gray: #585856;
+$deep-gray: #4a4a48;

@@ -1,0 +1,145 @@
+[
+  {
+    "id": 1,
+    "name": "腹泻针灸1",
+    "isReady": true,
+    "plan": [
+      {
+        "name": "腹泻针灸1",
+        "treatType": 2,
+        "chooseName": "回旋灸",
+        "time": 1,
+        "bodyType": 2,
+        "points": [
+          {
+            "id": 1,
+            "bodyType": 2,
+            "name": "风门穴(左)",
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "rx": 0,
+            "ry": 0,
+            "rz": 0,
+            "status": 0,
+            "top": 180,
+            "left": 174
+          }
+        ]
+      },
+      {
+        "name": "腹泻针灸1",
+        "treatType": 0,
+        "chooseName": "悬停灸",
+        "time": 1,
+        "bodyType": 0,
+        "points": [
+          {
+            "id": 12,
+            "bodyType": 0,
+            "name": "关元穴",
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "rx": 0,
+            "ry": 0,
+            "rz": 0,
+            "status": 0,
+            "top": 425,
+            "left": 210
+          }
+        ]
+      },
+      {
+        "name": "腹泻针灸1",
+        "treatType": 3,
+        "chooseName": "往复灸",
+        "time": 1,
+        "bodyType": 1,
+        "points": [
+          {
+            "id": 15,
+            "bodyType": 1,
+            "name": "阳陵泉穴(左)",
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "rx": 0.0,
+            "ry": 0.0,
+            "rz": 0.0,
+            "status": 0,
+            "top": 180,
+            "left": 180
+          },
+          {
+            "id": 16,
+            "bodyType": 1,
+            "name": "阳陵泉穴(右)",
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "rx": 0.0,
+            "ry": 0.0,
+            "rz": 0.0,
+            "status": 0,
+            "top": 180,
+            "left": 250
+          }
+        ]
+      },
+      {
+        "name": "腹泻针灸1",
+        "treatType": 1,
+        "chooseName": "雀啄灸",
+        "time": 1,
+        "bodyType": 3,
+        "points": [
+          {
+            "id": 13,
+            "bodyType": 3,
+            "name": "太溪穴(左)",
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0,
+            "rx": 0.0,
+            "ry": 0.0,
+            "rz": 0.0,
+            "status": 0,
+            "top": 430,
+            "left": 170
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "腹泻针灸2",
+    "isReady": true,
+    "plan": [
+      {
+        "name": "腹泻针灸2",
+        "treatType": 2,
+        "chooseName": "回旋灸",
+        "time": 1,
+        "bodyType": 2,
+        "points": [
+          {
+            "id": 2,
+            "bodyType": 2,
+            "name": "风门穴(右)",
+            "x": 0,
+            "y": 0,
+            "z": 0,
+            "rx": 0,
+            "ry": 0,
+            "rz": 0,
+            "status": 0,
+            "top": 180,
+            "left": 174
+          }
+        ]
+      }
+    ]
+  }
+]

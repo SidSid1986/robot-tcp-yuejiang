@@ -1,0 +1,44 @@
+/* el-message */
+.el-message__content {
+  font-size: 18px !important;
+}
+
+.el-message__icon {
+  font-size: 18px !important;
+}
+
+.el-popup-parent--hidden {
+  // background-color: red;
+  width: 100% !important;
+}
+
+.el-message--success,
+.el-message--error,
+.el-message--warning,
+.el-message--info {
+  z-index: 9999 !important;
+}
+
+.el-loading-text {
+  font-size: 30px !important;
+  color: #9a6cb8 !important;
+}
+
+.el-loading-mask {
+  z-index: 9999 !important;
+}
+/* 全局统一美化滚动条  */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #262624;
+}
+::-webkit-scrollbar-thumb {
+  background: #555550;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #707070;
+}
