@@ -26,6 +26,19 @@
         <VideoPlay style="width: 1em; height: 1em; margin-right: 8px" />
         开始演示
       </el-button> -->
+      <el-button @click="handleMoveLeft" type="warning">
+        <Refresh style="width: 1em; height: 1em; margin-right: 8px" />
+        向左移动 X-
+      </el-button>
+      <el-button @click="handleMoveRight" type="primary">
+        向右移动 X-
+      </el-button>
+
+      <!--  停止按钮（官方指令）-->
+      <el-button @click="stopRobotMove" type="danger">
+        停止运动
+      </el-button>
+
     </div>
   </div>
 </template>
@@ -46,6 +59,9 @@ const props = defineProps({
     default: false,
   },
 });
+
+// 自动移动停止标志
+const stopAutoMove = ref(false);
 
 // 定义组件向父级传递的事件
 const emit = defineEmits(["joint-change", "gripper-change", "reset-all"]);
@@ -119,9 +135,7 @@ const INITIAL_POSITIONS = {
 
 let isDemoRunning = ref(false); // 防止重复点击
 
-/**
- * 机械臂复位功能：将所有关节重置为初始角度，夹爪闭合
- */
+//机械臂复位功能：将所有关节重置为初始角度，夹爪闭合
 const robotReset = () => {
   const targetValues = [0, 0, 0, 0, 0, 0];
 
@@ -139,12 +153,12 @@ const robotReset = () => {
 };
 
 // ==============================================
-// ✅ 越疆官方指令发送函数（只改这里，其他完全不动）
+// ✅ 已修复：弧度 → 角度 正确发送
 // ==============================================
 const sendMoveToRobot = async (jointValuesRad) => {
   if (!window.electronAPI) return
 
-  // 弧度 → 角度（官方必须用角度）
+  // 弧度 → 角度
   const j1 = parseFloat((jointValuesRad[0] * 180 / Math.PI).toFixed(1));
   const j2 = parseFloat((jointValuesRad[1] * 180 / Math.PI).toFixed(1));
   const j3 = parseFloat((jointValuesRad[2] * 180 / Math.PI).toFixed(1));
@@ -152,108 +166,111 @@ const sendMoveToRobot = async (jointValuesRad) => {
   const j5 = parseFloat((jointValuesRad[4] * 180 / Math.PI).toFixed(1));
   const j6 = parseFloat((jointValuesRad[5] * 180 / Math.PI).toFixed(1));
 
-  // ✅ 越疆官方标准格式
   const cmd = `MovJ(joint={${j1},${j2},${j3},${j4},${j5},${j6}},a=20,v=20)`;
 
-  console.log("👉 关节弧度:", jointValuesRad);
-  console.log("👉 机器人角度:", [j1, j2, j3, j4, j5, j6]);
-  console.log("👉 官方指令:", cmd);
+  console.log("关节弧度:", jointValuesRad);
+  console.log("机器人角度:", [j1, j2, j3, j4, j5, j6]);
+  console.log("官方指令:", cmd);
 
   const res = await window.electronAPI.sendRobotCmd(cmd);
   console.log("机器人返回:", res);
 }
 
-/**
- * 更新某个关节的角度
- */
+
+// ==============================================
+// ✅ 新：发送 位姿Pose 给机器人（直线运动 MovL）
+// ==============================================
+const sendMovePoseToRobot = async (pose) => {
+  if (!window.electronAPI) return
+
+  const x = parseFloat(pose.x.toFixed(2));
+  const y = parseFloat(pose.y.toFixed(2));
+  const z = parseFloat(pose.z.toFixed(2));
+  const rx = parseFloat(pose.rx.toFixed(1));
+  const ry = parseFloat(pose.ry.toFixed(1));
+  const rz = parseFloat(pose.rz.toFixed(1));
+
+  // ✅ 越疆官方指令：MovL 直线运动（笛卡尔）
+  const cmd = `MovL(pose={${x},${y},${z},${rx},${ry},${rz}},a=20,v=20)`;
+
+  console.log("发送Pose:", pose);
+  console.log("官方指令:", cmd);
+
+  const res = await window.electronAPI.sendRobotCmd(cmd);
+  console.log("机器人返回:", res);
+}
+
+//更新某个关节的角度
 const updateJoint = (jointName, value, jointValues) => {
   console.log("所有轴的数据", jointValues);
-
-  // emit("joint-change", {
-  //   jointValues: jointValues.map(Number),
-  // });
-
   sendMoveToRobot(jointValues)
 };
 
-/**
- * 平滑插值执行函数
- */
+//平滑插值执行函数
+
 const smoothDemoLoop = () => {
   if (!isDemoRunning.value) return;
 
-  // 获取当前目标帧
   if (currentFrameIndex.value < demoTrajectory.length) {
     targetJointValues.value = demoTrajectory[currentFrameIndex.value];
   } else {
-    // 所有帧执行完毕
     console.log("码垛操作完成（所有轨迹帧执行完毕）");
     isDemoRunning.value = false;
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
     return;
   }
 
-  // 对每个关节进行 lerp 插值
   const newJointValues = currentJointValues.value.map((current, i) => {
     const target = targetJointValues.value[i];
-    return current + (target - current) * lerpFactor; // lerp 公式
+    return current + (target - current) * lerpFactor;
   });
 
-  // 更新机械臂关节（通过父组件）
   emit("joint-change", {
     jointValues: newJointValues,
   });
 
-  // 更新当前值
   currentJointValues.value = newJointValues;
 
-  // 检查是否足够接近目标，可设置一个阈值，比如 0.01
   const isClose = targetJointValues.value.every(
     (t, i) => Math.abs(t - newJointValues[i]) < 0.01
   );
 
   if (isClose) {
-    // 接近目标，切换到下一帧
     currentFrameIndex.value++;
   }
 
-  // 请求下一帧动画
   animationFrameId = requestAnimationFrame(smoothDemoLoop);
 };
 
-// 精细微调关节（± 按钮）
 const stepJoint = (index, step) => {
-  const targetValues = jointValues.value.slice();
-
+  const targetValues = [...jointValues.value];
   let val = targetValues[index] + step;
   val = Math.max(joints.value[index].min, Math.min(joints.value[index].max, val));
-
   targetValues[index] = val;
 
+  // ==============================================
+  //  核心逻辑：已连接 → 只发指令，不修改页面
+  //  未连接 → 修改页面，本地演示
+  // ==============================================
   if (props.robotConnected) {
-    // 已连接：只发命令，等机器人反馈更新页面
+    // 联机：只发送给机器人，页面模型等待机器人自动反馈
     sendMoveToRobot(targetValues);
-    return;
+  } else {
+    // 脱机：本地修改页面模型
+    jointValues.value = targetValues;
+    emit("joint-change", {
+      jointValues: targetValues.map(Number),
+      fromFeedback: true,
+    });
   }
-
-  // 未连接：本地仿真，立即更新页面
-  jointValues.value = targetValues;
-
-  emit("joint-change", {
-    jointValues: targetValues.map(Number),
-    fromFeedback: true,
-  });
 };
 
-/**
- * 开始演示 - 逐步改变关节值到目标位置
- */
+//开始演示 - 逐步改变关节值到目标位置
 const startDemo = (jointArr) => {
   if (isDemoRunning.value) return;
 
   const targetPositions = jointArr;
 
-  // 检查是否已经在目标位置
   const isAtTarget = jointValues.value.every(
     (current, index) => Math.abs(current - targetPositions[index]) < 0.01
   );
@@ -266,36 +283,29 @@ const startDemo = (jointArr) => {
   isDemoRunning.value = true;
   currentFrameIndex.value = 0;
 
-  // 使用插值动画逐步移动到目标位置
   smoothDemoLoopToTarget(targetPositions);
 };
 
-/**
- * 平滑插值到目标位置
- */
+//平滑插值到目标位置
 const smoothDemoLoopToTarget = async (targetPositions) => {
-  // 插值参数
-  const lerpFactor = 0.05; // 调整这个值可以改变动画速度
-  const stepSize = 0.1; // 步长
+  const lerpFactor = 0.05;
+  const stepSize = 0.1;
 
   const animate = () => {
     if (!isDemoRunning.value) return;
 
     let allReached = true;
 
-    // 对每个关节进行插值
     const newJointValues = jointValues.value.map((current, index) => {
       const target = targetPositions[index];
       const difference = target - current;
 
-      // 如果差距很小，直接设为目标值
       if (Math.abs(difference) < stepSize) {
         return target;
       }
 
       allReached = false;
 
-      // 按步长递增/递减
       if (difference > 0) {
         return Math.min(current + stepSize, target);
       } else {
@@ -303,50 +313,331 @@ const smoothDemoLoopToTarget = async (targetPositions) => {
       }
     });
 
-    // 更新当前关节值
     jointValues.value = newJointValues;
 
-    // 发送更新到父组件
     emit("joint-change", {
       jointValues: newJointValues.map(Number),
     });
 
-    //  演示动画也自动发送官方指令
     sendMoveToRobot(newJointValues);
 
     if (allReached) {
-      // 到达目标位置
       console.log("✅ 已到达目标位置");
       isDemoRunning.value = false;
     } else {
-      // 继续动画
       requestAnimationFrame(animate);
     }
   };
 
-  // 开始动画
   animate();
 };
 
-//临时增加手势控制连接
-//手势连接
-const handleConnectGesture = async (gesture) => {
-  await window.electronAPI.connectGesture("192.168.6.123", 5000);
-  window.electronAPI.onGestureData((data) => {
-    console.log("收到手势：", data);
 
-    // 解析后直接控制机械臂
-    // jointValues.value[0] = ...
-    // sendMoveToRobot(jointValues.value)
+const stopRobotMove = async () => {
+  stopAutoMove.value = true;
+  await window.electronAPI.MoveJog();
+  console.log("✅ 已完全停止！");
+};
+
+
+
+
+
+// 手势实时控制 —— 100% 按你的按钮逻辑  
+// const handleConnectGesture = async () => {
+//   stopAutoMove.value = false;
+//   let isMoving = false;
+
+//   // ==================== 配置
+//   const SCALE = 0.5;
+//   const MAX_Y = 150;
+//   const MIN_Y = -300;
+//   const SMOOTH_FACTOR = 0.3;
+//   const MIN_MOVE = 0.5;
+//   const COOLDOWN = 150;
+
+//   // ==================== 内部状态
+//   let basePose = null;
+//   let lastX = 0;
+//   let lastSendTime = 0;
+
+//   await window.electronAPI.connectGesture("192.168.6.123", 5000);
+
+//   window.electronAPI.onGestureData(async (dataStr) => {
+//     try {
+//       const data = JSON.parse(dataStr);
+//       const now = Date.now();
+
+//       if (now - lastSendTime < COOLDOWN) return;
+//       if (isMoving || stopAutoMove.value) return;
+
+//       const rawX = data.x;
+//       const smoothX = lastX + (rawX - lastX) * SMOOTH_FACTOR;
+//       lastX = smoothX;
+
+//       const dxReal = -smoothX * SCALE;
+//       if (Math.abs(dxReal) < MIN_MOVE) return;
+
+//       isMoving = true;
+//       lastSendTime = now;
+//       if (!basePose) {
+//         const cp = await window.electronAPI.getRobotPose();
+//         if (!cp) { isMoving = false; return; }
+//         basePose = { ...cp };
+//       }
+
+//       let targetY = basePose.y + dxReal;
+//       if (targetY > MAX_Y) targetY = MAX_Y;
+//       if (targetY < MIN_Y) targetY = MIN_Y;
+
+//       const targetPose = {
+//         x: basePose.x,
+//         y: targetY,
+//         z: basePose.z,
+//         rx: basePose.rx,
+//         ry: basePose.ry,
+//         rz: basePose.rz,
+//       };
+
+
+//       await sendMovePoseToRobot(targetPose);
+
+//       basePose.y = targetY;
+
+//     } catch (err) {
+//       console.error("手势错误", err);
+//     } finally {
+//       setTimeout(() => isMoving = false, 50);
+//     }
+//   });
+// };
+
+/**
+ * 手势实时控制 - 基于关节空间的增量运动
+ * 核心：避免奇异点 + 实时响应
+ */
+const handleConnectGesture = async () => {
+  stopAutoMove.value = false;
+  let isMoving = false;
+
+  // ==================== 配置 - 优化版
+  const SCALE = 0.5;               // ⭐ 提高灵敏度
+  const SMOOTH_FACTOR = 0.15;      // ⭐ 更快的响应
+  const MIN_MOVE = 0.2;            // ⭐ 降低最小阈值（0.5→0.2）
+  const COOLDOWN = 100;            // ⭐ 加快刷新率（150→100ms）
+
+  // ==================== 初始化状态
+  let baseJoints = null;
+  let lastX = 0;
+  let lastSendTime = 0;
+
+  await window.electronAPI.connectGesture("192.168.6.123", 5000);
+
+  window.electronAPI.onGestureData(async (dataStr) => {
+    try {
+      const data = JSON.parse(dataStr);
+      const now = Date.now();
+
+      if (now - lastSendTime < COOLDOWN) return;
+      if (isMoving || stopAutoMove.value) return;
+
+      // ==================== 1️⃣ 平滑手势数据
+      const rawX = data.x;
+      const smoothX = lastX + (rawX - lastX) * SMOOTH_FACTOR;
+      lastX = smoothX;
+
+      const dxReal = -smoothX * SCALE;
+      if (Math.abs(dxReal) < MIN_MOVE) return;  // ⭐ 更灵敏的阈值
+
+      isMoving = true;
+      lastSendTime = now;
+
+      // ==================== 2️⃣ 首次运动：记录基准关节角度
+      if (!baseJoints) {
+        const joints = await window.electronAPI.getRobotAngle();
+
+        if (!joints || joints.length < 6) {
+          console.error("❌ 获取关节角度失败");
+          isMoving = false;
+          return;
+        }
+
+        baseJoints = [...joints];
+        console.log("✅ 记录初始关节角度(度):", baseJoints);
+        isMoving = false;
+        return;
+      }
+
+      // ==================== 3️⃣ 计算目标关节角度
+      const targetJoints = baseJoints.map((val, idx) => {
+        if (idx === 0) {
+          // ⭐ 关键：用累积位置，而不是相对baseJoints
+          // 这样可以避免抖动
+          return val + dxReal;
+        }
+        return val;
+      });
+
+      // ==================== 4️⃣ 限位检查
+      let withinBounds = true;
+      for (let i = 0; i < targetJoints.length; i++) {
+        const min = joints.value[i].min * 180 / Math.PI;
+        const max = joints.value[i].max * 180 / Math.PI;
+
+        if (targetJoints[i] < min || targetJoints[i] > max) {
+          console.warn(`⚠️ J${i + 1}超出范围: ${targetJoints[i]}°`);
+          withinBounds = false;
+          break;
+        }
+      }
+
+      if (!withinBounds) {
+        isMoving = false;
+        return;
+      }
+
+      // ==================== 5️⃣ 发送指令
+      console.log("手势→关节:", {
+        gesture_x: rawX,
+        smooth_x: smoothX.toFixed(2),
+        joint_delta: dxReal.toFixed(2),
+        target_joints: targetJoints.map(j => j.toFixed(1)),
+      });
+
+      const [j1, j2, j3, j4, j5, j6] = targetJoints.map(j => j.toFixed(1));
+      const cmd = `MovJ(joint={${j1},${j2},${j3},${j4},${j5},${j6}},a=20,v=20)`;
+
+      const res = await window.electronAPI.sendRobotCmd(cmd);
+      console.log("机器人返回:", res);
+
+    } catch (err) {
+      console.error("手势错误", err);
+    } finally {
+      setTimeout(() => isMoving = false, 50);
+    }
   });
 };
+
+
+
+//y增加向左最大150，y减少向右最小-300
+// 向左移动 = Y 减少（慢速模拟 + 软限位：Y ≤ 150）
+const handleMoveLeft = () => {
+  stopAutoMove.value = false;
+  let isMoving = false;
+  const SCALE = 5;    // 超慢速度
+  const MIN_Y = 150;   // Y 最小值限制
+
+  const move = async () => {
+    if (stopAutoMove.value) return;
+    if (isMoving) return;
+    isMoving = true;
+
+    try {
+      const currentPose = await window.electronAPI.getRobotPose();
+      if (!currentPose) return;
+
+      // 只动 Y 轴：减少（向左）
+      let targetY = currentPose.y - SCALE;
+      if (targetY < MIN_Y) {
+        targetY = MIN_Y;
+        await stopRobotMove();
+      }; // 限位
+
+      const targetPose = {
+        x: currentPose.x,        // X 完全不动
+        y: targetY,              // 只改 Y
+        z: currentPose.z,
+        rx: currentPose.rx,
+        ry: currentPose.ry,
+        rz: currentPose.rz,
+      };
+
+      // ==============================================
+      // 发送位姿Pose 给机器人（直线运动 MovL）
+      // ==============================================
+      await sendMovePoseToRobot(targetPose);
+
+      // ==============================================
+      // 发送关节给机器人 （IK 解析）
+      // ==============================================
+      // const joints = await window.electronAPI.ikSolve(targetPose);
+      // if (joints) {
+      //   sendMoveToRobot(joints);
+      // }
+    } catch (err) {
+      console.error("向左移动错误", err);
+    } finally {
+      isMoving = false;
+      setTimeout(move, 300);
+    }
+  };
+
+  move();
+};
+// 向右移动 = Y 增加（慢速模拟 + 软限位：Y ≥ -300）
+const handleMoveRight = () => {
+  stopAutoMove.value = false;
+  let isMoving = false;
+  const SCALE = 1;   // 超慢速度
+  const MAX_Y = -300;   // Y 最大值限制
+
+  const move = async () => {
+    if (stopAutoMove.value) return;
+    if (isMoving) return;
+    isMoving = true;
+
+    try {
+      const currentPose = await window.electronAPI.getRobotPose();
+      if (!currentPose) return;
+
+      // 只动 Y 轴：增加（向右）
+      let targetY = currentPose.y + SCALE;
+      if (targetY > MAX_Y) {
+        targetY = MAX_Y;
+        await stopRobotMove();
+      }; // 限位
+
+      const targetPose = {
+        x: currentPose.x,        // X 完全不动
+        y: targetY,              // 只改 Y
+        z: currentPose.z,
+        rx: currentPose.rx,
+        ry: currentPose.ry,
+        rz: currentPose.rz,
+      };
+
+      console.log(targetPose);
+      // ==============================================
+      // 发送位姿Pose 给机器人（直线运动 MovL）
+      // ==============================================
+      await sendMovePoseToRobot(targetPose);
+
+      // ==============================================
+      // 发送关节给机器人 （IK 解析）
+      // ==============================================
+      // const joints = await window.electronAPI.ikSolve(targetPose);
+      // console.log(joints);
+      // if (joints) {
+      //   sendMoveToRobot(joints);
+      // }
+    } catch (err) {
+      console.error("向左移动错误", err);
+    } finally {
+      isMoving = false;
+      setTimeout(move, 300);
+    }
+  };
+
+  move();
+};
+
+
 
 // 手势断断开
 const handleDisconnectGesture = () => {
   window.electronAPI.disconnectGesture();
 };
-
-
 
 watch(
   () => props.jointArr,
@@ -364,25 +655,25 @@ watch(
 );
 
 onMounted(() => {
-
-  // 连接手势 临时增加
-  handleConnectGesture();
+  handleConnectGesture()
 });
 
 onUnmounted(() => {
-  // 断开手势 临时增加
   handleDisconnectGesture();
 });
 </script>
 
 <style scoped>
 .control-panel {
+  padding-top: 4vh;
   background: rgba(245, 245, 245, 0.95);
   height: 100%;
   overflow-y: auto;
   position: relative;
   box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
   backdrop-filter: blur(5px);
+
+  /* border:3px solid red; */
 }
 
 .slider-container {
@@ -396,14 +687,7 @@ onUnmounted(() => {
 /* 滑动条标签 */
 .slider-container label {
   display: block;
-
   font-weight: bold;
-}
-
-/* 滑动条样式 */
-.slider-container input[type="range"] {
-  width: 100%;
-  margin: 5px 0;
 }
 
 /* 数值显示 */
@@ -415,10 +699,5 @@ onUnmounted(() => {
 /* 按钮区域样式 */
 .button-area {
   margin-top: 20px;
-}
-
-/* 重置按钮悬停效果  */
-.reset-all-btn:hover {
-  background-color: #c0392b;
 }
 </style>

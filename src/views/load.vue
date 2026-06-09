@@ -133,6 +133,7 @@ const scanResult = ref([]); // 扫描到的IP列表
 const ipArr = ref([192, 168, 6, 200]); // 默认IP：192.168.6.200
 const robotPort = ref(29999); // 越疆默认端口可自行修改
 
+
 const robotStatus = ref("未连接");
 
 let offRobotFeedback = null;// 关闭机器人反馈监听
@@ -313,7 +314,7 @@ const translateJoint = (codeArr) => {
   console.log("有效角度数组（-360~360°）:", validCodeArr);
   console.log("转换后的弧度数组（±6.28）:", radianArr);
 
-  // 3. 直接赋值数字数组（ 保留原始数字类型）
+  // 3. 直接赋值数字数组 
   jointArr.value = radianArr; // 纯数字数组，子组件可直接使用
   console.log("最终传递给子组件的弧度数组:", jointArr.value);
 
@@ -393,7 +394,8 @@ let lastEmitTime = 0;
 // 坐标转换工具函数（统一坐标系：X右、Y前、Z上）
 const targetToThree = (targetX, targetY, targetZ) => {
   return new THREE.Vector3(
-    targetX, // X轴: 直接映射（右正）
+    // targetX, // X轴: 直接映射（右正）
+    -targetX, // X轴: 直接映射（左正）
     targetZ, // Z轴: 目标Z(上) → Three.js Y(上)
     targetY // Y轴: 目标Y(前) → Three.js Z(向内，取负)
   );
@@ -405,7 +407,8 @@ const targetToThree = (targetX, targetY, targetZ) => {
 
 const threeToTarget = (threeVec3) => {
   return {
-    x: threeVec3.x,
+    // x: threeVec3.x,
+    x: -threeVec3.x,//（左正） 
     y: threeVec3.z,
     z: threeVec3.y,
   };
@@ -417,7 +420,7 @@ const initScene = () => {
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0xeeeeee);
 
-  // 创建相机（保留原有参数，兼容双架构）
+  // 创建相机 
   camera = new THREE.PerspectiveCamera(
     85,
     container.value.clientWidth / container.value.clientHeight,
@@ -474,7 +477,7 @@ const initScene = () => {
   labelRenderer.domElement.style.pointerEvents = "none";
   container.value.appendChild(labelRenderer.domElement);
 
-  // 光源配置（保留原有，双架构通用）
+  // 光源配置 
   const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
   directionalLight.position.set(10, 20, 10);
   directionalLight.castShadow = true;
@@ -488,20 +491,20 @@ const initScene = () => {
   const ambientLight = new THREE.AmbientLight(0x606060, 1.3);
   scene.add(ambientLight);
 
-  // 网格地面（保留）
+  // 网格地面 
   const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x888888);
   gridHelper.position.y = -0.01;
   scene.add(gridHelper);
 
-  // 添加带标签的坐标轴（保留）
+  // 添加带标签的坐标轴 
   addAxesWithLabels();
 
-  // 轨道控制器（保留，双架构通用）
+  // 轨道控制器 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.05;
 
-  // 加载机器人模型（保留）
+  // 加载机器人模型 
   loadRobotModel();
 
   // ========== 启动渲染循环 ==========
@@ -596,7 +599,7 @@ const recordTrackedMeshTrajectory = () => {
 
 const loadRobotModel = () => {
   console.log("加载机器人模型...");
-  // 1. 配置GLTF+DRACO加载器（开启GPU加速解码，保留该优化）
+  // 1. 配置GLTF+DRACO加载器 
   const gltfLoader = new GLTFLoader();
   console.log(gltfLoader);
   try {
@@ -604,7 +607,7 @@ const loadRobotModel = () => {
     dracoLoader.setDecoderPath(
       "https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/libs/draco/"
     );
-    dracoLoader.setDecoderConfig({ type: "webgl" }); // 强制使用WebGL GPU解码（保留，不影响模型结构）
+    dracoLoader.setDecoderConfig({ type: "webgl" }); // 强制使用WebGL GPU解码 
     gltfLoader.setDRACOLoader(dracoLoader);
 
     console.log(111);
@@ -612,7 +615,7 @@ const loadRobotModel = () => {
     console.warn("DRACO加载失败:", e);
   }
 
-  // ========== 原有路径适配逻辑  ==========
+  // ==========  路径适配   ==========
   let kr1Path = "/kr1"; // 开发环境（public 根路径）
   if (window.electronAPI && !import.meta.env.DEV) {
     // 打包后的 Electron 环境：使用 resources 目录下的 kr1
@@ -650,11 +653,11 @@ const loadRobotModel = () => {
               for (let i = 0; i < positions.length; i++) {
                 if (isNaN(positions[i])) {
                   console.error(`模型 ${child.name} 存在 NaN 顶点，替换为 0`);
-                  positions[i] = 0; // 修复 NaN 顶点（保留）
+                  positions[i] = 0; //   NaN 顶点 
                 }
               }
               child.geometry.attributes.position.needsUpdate = true;
-              child.geometry.computeBoundingSphere(); // 重新计算包围球（保留）
+              child.geometry.computeBoundingSphere(); // 重新计算包围球 
 
 
               // ========== 安全的GPU优化  ==========
@@ -675,7 +678,7 @@ const loadRobotModel = () => {
           }
         });
 
-        model.scale.set(0.001, 0.001, 0.001); // 毫米转米（保留原有缩放）
+        model.scale.set(0.001, 0.001, 0.001); // 毫米转米 
         onComplete(model);
       },
       undefined,
@@ -690,7 +693,7 @@ const loadRobotModel = () => {
     );
   };
 
-  // 3. 原有关节初始位置逻辑（保留不变）
+  // 3. 原有关节初始位置逻辑 
   const INITIAL_POSITIONS = {
     joint1: 0.0, // 底座关节给一个小角度
     joint2: 0.0, // 上臂抬起
@@ -700,7 +703,7 @@ const loadRobotModel = () => {
     joint6: 0.0,
   };
 
-  // 适配URDF文件路径（保留不变）
+  // 适配URDF文件路径 
   let urdfPath = "./kr1/urdf/kr1.urdf"; // 开发环境
   if (window.electronAPI && !import.meta.env.DEV) {
     urdfPath = `${window.electronAPI.getResourcesPath()}/kr1/urdf/kr1.urdf`;
@@ -713,6 +716,7 @@ const loadRobotModel = () => {
 
     robot.scale.set(2, 2, 2);
     robot.rotation.x = -Math.PI / 2;
+    // robot.rotation.y = Math.PI; 
     robot.position.set(0, 0, 0);
 
     robotGroup = new THREE.Group();
@@ -729,18 +733,18 @@ const loadRobotModel = () => {
       endEffector = trackedMesh;
       trackedMeshForTrajectory.value = trackedMesh;
 
-      // 先设置初始关节位置（保留不变）
+      // 先设置初始关节位置 
       Object.entries(INITIAL_POSITIONS).forEach(([jointName, value]) => {
         if (robot.joints[jointName]) {
           robot.joints[jointName].setJointValue(value);
         }
       });
 
-      // 更新矩阵世界（保留不变）
+      // 更新矩阵世界 
       robot.updateMatrixWorld(true);
       robotGroup.updateMatrixWorld(true);
 
-      // 获取末端执行器位置（保留不变）
+      // 获取末端执行器位置 
       const worldPos = new THREE.Vector3();
       trackedMesh.getWorldPosition(worldPos);
       const targetPos = threeToTarget(worldPos);
@@ -750,7 +754,7 @@ const loadRobotModel = () => {
       state.endZ = targetPos.z;
 
       console.log(
-        "✅ 初始末端世界坐标：X:",
+        " 初始末端世界坐标：X:",
         state.endX.toFixed(2),
         "Y:",
         state.endY.toFixed(2),
@@ -761,7 +765,7 @@ const loadRobotModel = () => {
       console.warn("未找到 name 为空的末端 Mesh，请检查模型加载结构！");
     }
 
-    // 设置相机视角（保留不变）
+    // 设置相机视角 
     const box = new THREE.Box3().setFromObject(robot);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3()).length();
@@ -903,9 +907,9 @@ const updateTempTrajectoryLine = () => {
  */
 const animate = () => {
   requestAnimationFrame(animate);
-  controls.update(); // 轨道控制器更新（必须保留）
+  controls.update(); // 轨道控制器更新 
 
-  // 双架构通用渲染逻辑（核心！之前可能因为条件判断导致渲染不执行）
+  // 双架构通用渲染逻辑
   if (renderer && scene && camera) {
     renderer.render(scene, camera);
     // 确保 labelRenderer 存在再渲染
@@ -995,7 +999,7 @@ const resetAllJoints = (positions) => {
 
   // 🔧 然后更新末端坐标
   if (endEffector) {
-    // 确保末端执行器的矩阵也是最新的
+    // 确保末端执行器的矩阵是最新的
     endEffector.updateMatrixWorld(true);
 
     const worldPos = new THREE.Vector3();
@@ -1093,11 +1097,59 @@ const toggleRecord = () => {
 /**
  * 轨迹回放
  */
+// const playRecord = () => {
+//   if (state.jointTrajectory.length < 2) return; // 确保有数据
+
+//   state.isPlaying = true;
+//   // transformControls.enabled = false;
+//   let index = 0;
+//   const totalFrames = state.jointTrajectory.length;
+
+//   playInterval = setInterval(() => {
+//     if (index >= totalFrames) {
+//       clearInterval(playInterval);
+//       state.isPlaying = false;
+//       // transformControls.enabled = true;
+//       playProgress.value = 0;
+//       return;
+//     }
+
+//     // 当前帧的关节角度数组
+//     const jointValues = state.jointTrajectory[index];
+
+//     const jointOrder = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"];
+
+//     jointValues.forEach((value, i) => {
+//       const jointName = jointOrder[i];
+//       if (robot.joints[jointName]) {
+//         robot.joints[jointName].setJointValue(value);
+//       }
+//     });
+
+//     console.log("🔧 回放中，endEffector:", endEffector);
+
+//     // 可选：更新末端显示坐标
+//     if (endEffector) {
+//       const targetPos = threeToTarget(endEffector.position);
+//       state.endX = targetPos.x;
+//       state.endY = targetPos.y;
+//       state.endZ = targetPos.z;
+//     }
+
+//     playProgress.value = index / totalFrames;
+//     index++;
+//   }, 50); // 每50ms一帧，可调整
+// };
+
+
+/**
+ * 轨迹回放（联机/离线双模式）
+ */
 const playRecord = () => {
-  if (state.jointTrajectory.length < 2) return; // 确保有数据
+  // 无数据直接返回
+  if (state.jointTrajectory.length < 2) return;
 
   state.isPlaying = true;
-  // transformControls.enabled = false;
   let index = 0;
   const totalFrames = state.jointTrajectory.length;
 
@@ -1105,38 +1157,44 @@ const playRecord = () => {
     if (index >= totalFrames) {
       clearInterval(playInterval);
       state.isPlaying = false;
-      // transformControls.enabled = true;
       playProgress.value = 0;
       return;
     }
 
-    // 当前帧的关节角度数组
+    // 当前帧关节数据
     const jointValues = state.jointTrajectory[index];
 
-    const jointOrder = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"];
 
-    jointValues.forEach((value, i) => {
-      const jointName = jointOrder[i];
-      if (robot.joints[jointName]) {
-        robot.joints[jointName].setJointValue(value);
+    if (robotConnected.value) {
+      sendMoveToRobot(jointValues);
+    }
+
+    // ==============================================
+    //  ：本地仿真，直接动页面模型
+    // ==============================================
+    else {
+      const jointOrder = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"];
+      jointValues.forEach((value, i) => {
+        const jointName = jointOrder[i];
+        if (robot.joints[jointName]) {
+          robot.joints[jointName].setJointValue(value);
+        }
+      });
+
+      // 更新末端坐标
+      if (endEffector) {
+        endEffector.updateMatrixWorld(true);
+        const targetPos = threeToTarget(endEffector.getWorldPosition(new THREE.Vector3()));
+        state.endX = targetPos.x;
+        state.endY = targetPos.y;
+        state.endZ = targetPos.z;
       }
-    });
-
-    console.log("🔧 回放中，endEffector:", endEffector);
-
-    // 可选：更新末端显示坐标
-    if (endEffector) {
-      const targetPos = threeToTarget(endEffector.position);
-      state.endX = targetPos.x;
-      state.endY = targetPos.y;
-      state.endZ = targetPos.z;
     }
 
     playProgress.value = index / totalFrames;
     index++;
-  }, 50); // 每50ms一帧，可调整
+  }, 50);
 };
-
 /**
  * 清除轨迹
  */
@@ -1154,6 +1212,28 @@ const clearRecord = () => {
     tempTrajectoryLine = null;
   }
 };
+
+const sendMoveToRobot = async (jointValuesRad) => {
+  if (!window.electronAPI) return
+
+  // 弧度 → 角度 
+  const j1 = parseFloat((jointValuesRad[0] * 180 / Math.PI).toFixed(1));
+  const j2 = parseFloat((jointValuesRad[1] * 180 / Math.PI).toFixed(1));
+  const j3 = parseFloat((jointValuesRad[2] * 180 / Math.PI).toFixed(1));
+  const j4 = parseFloat((jointValuesRad[3] * 180 / Math.PI).toFixed(1));
+  const j5 = parseFloat((jointValuesRad[4] * 180 / Math.PI).toFixed(1));
+  const j6 = parseFloat((jointValuesRad[5] * 180 / Math.PI).toFixed(1));
+
+  //   越疆官方标准格式
+  const cmd = `MovJ(joint={${j1},${j2},${j3},${j4},${j5},${j6}},a=20,v=20)`;
+
+  console.log("关节弧度:", jointValuesRad);
+  console.log("机器人角度:", [j1, j2, j3, j4, j5, j6]);
+  console.log("官方指令:", cmd);
+
+  const res = await window.electronAPI.sendRobotCmd(cmd);
+  console.log("机器人返回:", res);
+}
 
 // 生命周期
 onMounted(() => {
@@ -1183,11 +1263,15 @@ onMounted(() => {
     }
     canvas.remove();
   }
+
   // ==============================================
   offRobotFeedback = window.electronAPI?.onRobotFeedback?.((data) => {
-    const qActualRad = data.qActual.map((deg) => deg * Math.PI / 180);
+    const robotDeg = data.qActual;
+    const qActualRad = robotDeg.map(deg => deg * Math.PI / 180);
     jointArr.value = qActualRad;
-    // console.log("页面收到实时关节角度:", data.qActual);
+
+    // console.log("【机器人角度 deg】", robotDeg);
+    // console.log("【模型显示角度 deg】", qActualRad.map(r => r * 180 / Math.PI));
   });
   // 统一初始化场景（双架构通用）
   initScene();

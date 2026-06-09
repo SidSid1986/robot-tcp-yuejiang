@@ -2,7 +2,7 @@
  * @Author: Sid Li
  * @Date: 2026-06-04 17:00:25
  * @LastEditors: Sid Li
- * @LastEditTime: 2026-06-06 14:11:06
+ * @LastEditTime: 2026-06-09 16:40:02
  * @Description: 越疆机器人 在线模式完整API + 手势TCP控制
  */
 const { contextBridge, ipcRenderer } = require("electron");
@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   enableRobot: () => ipcRenderer.invoke("robot:enable"),
   // 下使能
   disableRobot: () => ipcRenderer.invoke("robot:disable"),
+
+  // 停止运动
+  MoveJog: (axisID) => ipcRenderer.invoke("robot:moveJog", axisID),
   // 设置TCP模式
   setTcpMode: () => ipcRenderer.invoke("robot:setTcpMode"),
   // 清除错误
@@ -70,4 +73,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
   startDragRobot: () => ipcRenderer.invoke("robot:startDrag"),
   // 退出拖拽模式
   stopDragRobot: () => ipcRenderer.invoke("robot:stopDrag"),
+
+  // 获取当前末端位姿（x,y,z,rx,ry,rz）
+  getRobotPose: () => ipcRenderer.invoke("robot:getPose"),
+
+  // 逆解：位姿 → 关节角度
+  ikSolve: (pose) => ipcRenderer.invoke("robot:ikSolve", pose),
+
+  // 获取当前关节角度（度数）
+  getRobotAngle: () => ipcRenderer.invoke("robot:getAngle"),
 });
