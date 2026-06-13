@@ -2,9 +2,9 @@
  * @Author: Sid Li
  * @Date: 2026-06-04 17:00:25
  * @LastEditors: Sid Li
- * @LastEditTime: 2026-06-06 08:45:36
+ * @LastEditTime: 2026-06-13 13:39:47
  * @FilePath: \0606yuejiang\electron\main.js
- * @Description: 
+ * @Description:
  */
 const { app } = require("electron");
 const { log } = require("./logger");
@@ -14,6 +14,11 @@ const { registerIPC } = require("./ipc");
 
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+
+app.commandLine.appendSwitch("ignore-gpu-blacklist");
+app.commandLine.appendSwitch("enable-gpu-rasterization");
+app.commandLine.appendSwitch("enable-zero-copy");
+app.commandLine.appendSwitch("disable-software-rasterizer");
 
 // ARM Linux 兼容
 if (process.platform === "linux" && process.arch() === "arm64") {
@@ -28,11 +33,11 @@ app.whenReady().then(() => {
 
   log("Electron 就绪");
 
-  //  windowManager 创建窗口
-  createWindow();
-
   //  注册IPC
   registerIPC();
+
+  //  windowManager 创建窗口
+  createWindow();
 
   // 延迟注册协议拦截
   setTimeout(() => {

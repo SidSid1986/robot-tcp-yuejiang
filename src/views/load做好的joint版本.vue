@@ -595,221 +595,190 @@ const recordTrackedMeshTrajectory = () => {
     updateTempTrajectoryLine(); // 实时画出轨迹线（黄色）
   }
 };
- 
+
 
 const loadRobotModel = () => {
-  console.log("=== 开始执行加载机器人模型 ===");
+  console.log("加载机器人模型...");
+  // 1. 配置GLTF+DRACO加载器 
   const gltfLoader = new GLTFLoader();
-  // 渲染层无法直接require node内置模块，URL构造改用纯前端标准写法，不用path
+  console.log(gltfLoader);
   try {
     const dracoLoader = new DRACOLoader();
     dracoLoader.setDecoderPath(
       "https://cdn.jsdelivr.net/npm/three@0.150.1/examples/jsm/libs/draco/"
     );
-    dracoLoader.setDecoderConfig({ type: "webgl" });
+    dracoLoader.setDecoderConfig({ type: "webgl" }); // 强制使用WebGL GPU解码 
     gltfLoader.setDRACOLoader(dracoLoader);
+
+    console.log(111);
   } catch (e) {
     console.warn("DRACO加载失败:", e);
   }
 
-  const isElectron = !!window.electronAPI;
-  const isProd = !import.meta.env.DEV;
+  // ==========  路径适配   ==========
+  let kr1Path = "/kr1"; // 开发环境（public 根路径）
+  if (window.electronAPI && !import.meta.env.DEV) {
+    // 打包后的 Electron 环境：使用 resources 目录下的 kr1
+    kr1Path = window.electronAPI.getResourcesPath() + "/kr1";
+  }
 
-  console.log("📍 [STEP 1] 环境检测");
-  console.log("  isElectron:", isElectron);
-  console.log("  isProd:", isProd);
-  console.log("  import.meta.env.DEV:", import.meta.env.DEV);
+  const loader = new URDFLoader();
+  loader.packages = { kr1: kr1Path }; //使用适配后的路径
 
-  // ✅ 异步初始化路径
-  const initPaths = async () => {
-    let kr1Path = "/kr1";
-    let urdfPath = "./kr1/urdf/kr1.urdf";
+  // 2. 修复路径解析 
+  loader.loadMeshCb = (path, manager, onComplete) => {
+    // 先处理原始路径（去掉开头的"./"，确保路径格式统一）
+    let glbPath = path.replace(/^\.+/, "");
+    glbPath = glbPath.startsWith("/") ? glbPath : `/${glbPath}`;
 
-    console.log("📍 [STEP 2] 初始默认路径");
-    console.log("  kr1Path:", kr1Path);
-    console.log("  urdfPath:", urdfPath);
-
-    // 只有打包 + Electron 环境才需要获取真实路径
-    if (isProd && isElectron) {
-      console.log("📍 [STEP 3] 进入 打包+Electron 分支");
-      try {
-        console.log("  → 调用 IPC 获取 resources 路径...");
-        const realResPath = await window.electronAPI.getResourcesPath();
-        console.log("  ✅ IPC 返回值:", realResPath);
-        console.log("  ✅ 类型:", typeof realResPath);
-
-        // 末尾统一不加斜杠，拼接时手动加，杜绝双斜杠
-        kr1Path = realResPath + "/kr1";
-        urdfPath = realResPath + "/kr1/urdf/kr1.urdf";
-
-        console.log("📍 [STEP 4] 路径拼接完成");
-        console.log("  kr1Path:", kr1Path);
-        console.log("  urdfPath:", urdfPath);
-      } catch (err) {
-        console.error("❌ [STEP 3] 获取路径失败:", err);
-        console.error("  错误信息:", err.message);
-        console.error("  错误堆栈:", err.stack);
-      }
-    } else {
-      console.log("📍 [STEP 3] 进入 开发环境 分支，使用默认路径");
+    // 适配打包环境路径 
+    if (window.electronAPI && !import.meta.env.DEV) {
+      glbPath = glbPath.replace(/^\/kr1\//, `${kr1Path}/`);
     }
 
-    console.log("📍 [STEP 5] 开始执行 doLoad，传入参数:");
-    console.log("  kr1Path:", kr1Path);
-    console.log("  urdfPath:", urdfPath);
+    console.log("实际加载路径:", glbPath); // 验证路径是否正确
 
-    // ✅ 路径设置完成后，再执行加载
-    doLoad(kr1Path, urdfPath);
+    // 加载GLB模型
+    gltfLoader.load(
+      glbPath,
+      (gltf) => {
+        const model = gltf.scene;
+
+        // 校验模型顶点是否有 NaN 
+        model.traverse((child) => {
+          if (child.isMesh) {
+            const positionAttr = child.geometry.attributes.position;
+            if (positionAttr) {
+              const positions = positionAttr.array;
+              for (let i = 0; i < positions.length; i++) {
+                if (isNaN(positions[i])) {
+                  console.error(`模型 ${child.name} 存在 NaN 顶点，替换为 0`);
+                  positions[i] = 0; //   NaN 顶点 
+                }
+              }
+              child.geometry.attributes.position.needsUpdate = true;
+              child.geometry.computeBoundingSphere(); // 重新计算包围球 
+
+
+              // ========== 安全的GPU优化  ==========
+              child.geometry.computeVertexNormals();
+              // ==============================================
+            }
+
+            // ========== 安全的材质GPU优化（ ==========
+            if (child.material) {
+              child.material.side = THREE.FrontSide; // 只渲染正面， 
+              child.material.needsUpdate = true;
+              child.material.precision = "highp"; // 高精度材质， 
+            }
+            // ==============================================
+
+            // 开启视锥体裁剪 
+            child.frustumCulled = true;
+          }
+        });
+
+        model.scale.set(0.001, 0.001, 0.001); // 毫米转米 
+        onComplete(model);
+      },
+      undefined,
+      (error) => {
+        console.error(`加载GLB失败（${glbPath}）:`, error);
+        const placeholder = new THREE.Mesh(
+          new THREE.BoxGeometry(0.1, 0.1, 0.1),
+          new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true })
+        );
+        onComplete(placeholder);
+      }
+    );
   };
 
-  // ✅ 立即调用异步初始化
-  initPaths();
+  // 3. 原有关节初始位置逻辑 
+  const INITIAL_POSITIONS = {
+    joint1: 0.0, // 底座关节给一个小角度
+    joint2: 0.0, // 上臂抬起
+    joint3: 0.0, // 前臂再抬起
+    joint4: 0.0,
+    joint5: 0.0,
+    joint6: 0.0,
+  };
 
-  function doLoad(kr1Path, urdfPath) {
-    console.log("📍 [STEP 6] doLoad 函数执行");
-    console.log("  接收到 kr1Path:", kr1Path);
-    console.log("  接收到 urdfPath:", urdfPath);
-
-    const loader = new URDFLoader();
-    loader.packages = { kr1: kr1Path };
-
-    console.log("📍 [STEP 7] URDFLoader 初始化");
-    console.log("  loader.packages:", loader.packages);
-
-    loader.loadMeshCb = (path, manager, onComplete) => {
-      console.log("📍 [STEP 8] loadMeshCb 触发");
-      console.log("  URDF 原始 path:", path);
-      console.log("  isProd:", isProd);
-      console.log("  isElectron:", isElectron);
-
-      let glbPath;
-
-      if (isProd && isElectron) {
-        console.log("📍 [STEP 9A] 进入 打包+Electron 路径处理");
-        console.log("  原始 path:", path);
-
-        // loader.packages 已经自动补齐完整绝对路径，不用再拼接kr1Path
-        let absPath = path.replace(/\\/g, "/");
-        console.log("  标准化斜杠后:", absPath);
-
-        // 仅转file协议，不再额外拼接
-        try {
-          glbPath = new URL(`file://${absPath}`).href;
-          console.log("  ✅ 最终file URL:", glbPath);
-        } catch (e) {
-          console.error("  ❌ URL 转换失败:", e);
-          glbPath = absPath;
-        }
-      } else {
-        console.log("📍 [STEP 9B] 进入 开发环境 路径处理");
-        glbPath = path.replace(/^\.+/, "");
-        glbPath = glbPath.startsWith("/") ? glbPath : `/${glbPath}`;
-        console.log("  处理后 glbPath:", glbPath);
-      }
-
-      console.log("📍 [STEP 10] 【最终要加载的 GLB 路径】:", glbPath);
-
-      gltfLoader.load(
-        glbPath,
-        (gltf) => {
-          console.log("✅ [STEP 11] GLB 加载成功:", glbPath);
-          const model = gltf.scene;
-          model.traverse((child) => {
-            if (child.isMesh) {
-              const positionAttr = child.geometry.attributes.position;
-              if (positionAttr) {
-                const positions = positionAttr.array;
-                for (let i = 0; i < positions.length; i++) {
-                  if (isNaN(positions[i])) positions[i] = 0;
-                }
-                child.geometry.attributes.position.needsUpdate = true;
-                child.geometry.computeBoundingSphere();
-                child.geometry.computeVertexNormals();
-              }
-              if (child.material) {
-                child.material.side = THREE.FrontSide;
-                child.material.needsUpdate = true;
-                child.material.precision = "highp";
-              }
-              child.frustumCulled = true;
-            }
-          });
-          model.scale.set(0.001, 0.001, 0.001);
-          onComplete(model);
-        },
-        undefined,
-        (error) => {
-          console.error(`❌ [STEP 11] GLB 加载失败`, glbPath);
-          console.error("  错误对象:", error);
-          const placeholder = new THREE.Mesh(
-            new THREE.BoxGeometry(0.1, 0.1, 0.1),
-            new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true })
-          );
-          onComplete(placeholder);
-        }
-      );
-    };
-
-    const INITIAL_POSITIONS = {
-      joint1: 0.0,
-      joint2: 0.0,
-      joint3: 0.0,
-      joint4: 0.0,
-      joint5: 0.0,
-      joint6: 0.0,
-    };
-
-    console.log("📍 [STEP 12] 开始加载 URDF 文件");
-    console.log("  urdfPath:", urdfPath);
-
-    loader.load(urdfPath, (result) => {
-      console.log("✅ [STEP 13] URDF 加载成功");
-      robot = result;
-      robot.scale.set(2, 2, 2);
-      robot.rotation.x = -Math.PI / 2;
-      robot.position.set(0, 0, 0);
-
-      robotGroup = new THREE.Group();
-      scene.add(robotGroup);
-      robotGroup.add(robot);
-
-      let trackedMesh = robot.getObjectByName("Link6");
-      if (trackedMesh) {
-        endEffector = trackedMesh;
-        trackedMeshForTrajectory.value = trackedMesh;
-        Object.entries(INITIAL_POSITIONS).forEach(([jointName, value]) => {
-          if (robot.joints[jointName])
-            robot.joints[jointName].setJointValue(value);
-        });
-        robot.updateMatrixWorld(true);
-        robotGroup.updateMatrixWorld(true);
-
-        const worldPos = new THREE.Vector3();
-        trackedMesh.getWorldPosition(worldPos);
-        const targetPos = threeToTarget(worldPos);
-        state.endX = targetPos.x;
-        state.endY = targetPos.y;
-        state.endZ = targetPos.z;
-
-        console.log("✅ 机器人模型完全加载成功");
-      } else {
-        console.warn("⚠️ 未找到 Link6");
-      }
-
-      const box = new THREE.Box3().setFromObject(robot);
-      const center = box.getCenter(new THREE.Vector3());
-      camera.position.set(center.x + 2, center.y + 2, center.z + 7);
-      camera.lookAt(center);
-      controls.update();
-      animate();
-    });
+  // 适配URDF文件路径 
+  let urdfPath = "./kr1/urdf/kr1.urdf"; // 开发环境
+  if (window.electronAPI && !import.meta.env.DEV) {
+    urdfPath = `${window.electronAPI.getResourcesPath()}/kr1/urdf/kr1.urdf`;
   }
+
+  loader.load(urdfPath, (result) => {
+    // 使用适配后的urdf路径
+    robot = result;
+    console.log(robot);
+
+    robot.scale.set(2, 2, 2);
+    robot.rotation.x = -Math.PI / 2;
+    // robot.rotation.y = Math.PI; 
+    robot.position.set(0, 0, 0);
+
+    robotGroup = new THREE.Group();
+    scene.add(robotGroup);
+    robotGroup.add(robot);
+
+    console.log("robot:", robot);
+    console.log("robotGroup:", robotGroup);
+
+    let trackedMesh = robot.getObjectByName("Link6");
+    console.log(trackedMesh);
+
+    if (trackedMesh) {
+      endEffector = trackedMesh;
+      trackedMeshForTrajectory.value = trackedMesh;
+
+      // 先设置初始关节位置 
+      Object.entries(INITIAL_POSITIONS).forEach(([jointName, value]) => {
+        if (robot.joints[jointName]) {
+          robot.joints[jointName].setJointValue(value);
+        }
+      });
+
+      // 更新矩阵世界 
+      robot.updateMatrixWorld(true);
+      robotGroup.updateMatrixWorld(true);
+
+      // 获取末端执行器位置 
+      const worldPos = new THREE.Vector3();
+      trackedMesh.getWorldPosition(worldPos);
+      const targetPos = threeToTarget(worldPos);
+
+      state.endX = targetPos.x;
+      state.endY = targetPos.y;
+      state.endZ = targetPos.z;
+
+      console.log(
+        " 初始末端世界坐标：X:",
+        state.endX.toFixed(2),
+        "Y:",
+        state.endY.toFixed(2),
+        "Z:",
+        state.endZ.toFixed(2)
+      );
+    } else {
+      console.warn("未找到 name 为空的末端 Mesh，请检查模型加载结构！");
+    }
+
+    // 设置相机视角 
+    const box = new THREE.Box3().setFromObject(robot);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3()).length();
+
+    camera.position.set(center.x + 2, center.y + 2, center.z + 7);
+    camera.lookAt(center);
+    controls.update();
+
+    animate();
+  });
 };
 
-
 // 设置鼠标点击事件
-
-
 const setupMouseClick = () => {
   const canvas = renderer.domElement;
 
@@ -915,7 +884,7 @@ const setupMouseClick = () => {
     }
   }
 };
-/**`
+/**
  * 更新临时轨迹线
  */
 const updateTempTrajectoryLine = () => {

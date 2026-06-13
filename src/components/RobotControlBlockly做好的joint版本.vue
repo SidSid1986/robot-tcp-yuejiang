@@ -190,8 +190,8 @@ const sendMovePoseToRobot = async (pose) => {
   const ry = parseFloat(pose.ry.toFixed(1));
   const rz = parseFloat(pose.rz.toFixed(1));
 
-  // a加速度提升，消除频繁启停卡顿
-  const cmd = `MovL(pose={${x},${y},${z},${rx},${ry},${rz}},a=45,v=25)`;
+  // ✅ 越疆官方指令：MovL 直线运动（笛卡尔）
+  const cmd = `MovL(pose={${x},${y},${z},${rx},${ry},${rz}},a=20,v=20)`;
 
   console.log("发送Pose:", pose);
   console.log("官方指令:", cmd);
@@ -199,20 +199,6 @@ const sendMovePoseToRobot = async (pose) => {
   const res = await window.electronAPI.sendRobotCmd(cmd);
   console.log("机器人返回:", res);
 }
-
-
-/**
- * 越疆官方点动指令封装
- * @param {string} axisID 轴标识，"J1" / "J1+" / "J1-" / "" 空字符串停止所有
- */
-const sendMoveJog = async (param) => {
-  if (!window.electronAPI || !props.robotConnected) return null;
-  const res = await window.electronAPI.MoveJog(param);
-  console.log("Jog调用返回：", res);
-  return res;
-};
-
-
 
 //更新某个关节的角度
 const updateJoint = (jointName, value, jointValues) => {
@@ -349,218 +335,190 @@ const smoothDemoLoopToTarget = async (targetPositions) => {
 
 const stopRobotMove = async () => {
   stopAutoMove.value = true;
-  await window.electronAPI.MoveJog("");
-  stopServoLoop?.();
-  console.log("✅ Servo伺服跟随 + 点动运动 全部强制停止");
+  await window.electronAPI.MoveJog();
+  console.log("✅ 已完全停止！");
 };
 
-//=====================================ServoP指令==================== 
 
 
 
-async function sendServoPCycle(args) {
-  const { stopAutoMove, stopServoLoop, servoRunning, latestTargetPose, SERVO_T, AHEADTIME, GAIN, sendRobotCmd } = args;
-  if (stopAutoMove.value) {
-    stopServoLoop();
-    return;
-  }
-  if (!servoRunning || !latestTargetPose) return;
 
-  const p = latestTargetPose;
-  const x = parseFloat(p.x.toFixed(2));
-  const y = parseFloat(p.y.toFixed(2));
-  const z = parseFloat(p.z.toFixed(2));
-  const rx = parseFloat(p.rx.toFixed(1));
-  const ry = parseFloat(p.ry.toFixed(1));
-  const rz = parseFloat(p.rz.toFixed(1));
+// 手势实时控制 —— 100% 按你的按钮逻辑  
+// const handleConnectGesture = async () => {
+//   stopAutoMove.value = false;
+//   let isMoving = false;
 
-  const cmd = `ServoP(${x},${y},${z},${rx},${ry},${rz},t=${SERVO_T},aheadtime=${AHEADTIME},gain=${GAIN});`;
-  console.log("[ServoP完整指令]", cmd);
-  try {
-    const res = await sendRobotCmd(cmd);
-    console.log("[ServoP返回结果]", res);
-    if (!res.ok || !res.reply.startsWith("0,")) {
-      console.error("[ServoP下发失败，停止跟随]", res);
-      stopServoLoop();
-    }
-  } catch (err) {
-    console.error("[ServoP调用异常]", err);
-    stopServoLoop();
-  }
-}
+//   // ==================== 配置
+//   const SCALE = 0.5;
+//   const MAX_Y = 150;
+//   const MIN_Y = -300;
+//   const SMOOTH_FACTOR = 0.3;
+//   const MIN_MOVE = 0.5;
+//   const COOLDOWN = 150;
 
+//   // ==================== 内部状态
+//   let basePose = null;
+//   let lastX = 0;
+//   let lastSendTime = 0;
+
+//   await window.electronAPI.connectGesture("192.168.6.123", 5000);
+
+//   window.electronAPI.onGestureData(async (dataStr) => {
+//     try {
+//       const data = JSON.parse(dataStr);
+//       const now = Date.now();
+
+//       if (now - lastSendTime < COOLDOWN) return;
+//       if (isMoving || stopAutoMove.value) return;
+
+//       const rawX = data.x;
+//       const smoothX = lastX + (rawX - lastX) * SMOOTH_FACTOR;
+//       lastX = smoothX;
+
+//       const dxReal = -smoothX * SCALE;
+//       if (Math.abs(dxReal) < MIN_MOVE) return;
+
+//       isMoving = true;
+//       lastSendTime = now;
+//       if (!basePose) {
+//         const cp = await window.electronAPI.getRobotPose();
+//         if (!cp) { isMoving = false; return; }
+//         basePose = { ...cp };
+//       }
+
+//       let targetY = basePose.y + dxReal;
+//       if (targetY > MAX_Y) targetY = MAX_Y;
+//       if (targetY < MIN_Y) targetY = MIN_Y;
+
+//       const targetPose = {
+//         x: basePose.x,
+//         y: targetY,
+//         z: basePose.z,
+//         rx: basePose.rx,
+//         ry: basePose.ry,
+//         rz: basePose.rz,
+//       };
+
+
+//       await sendMovePoseToRobot(targetPose);
+
+//       basePose.y = targetY;
+
+//     } catch (err) {
+//       console.error("手势错误", err);
+//     } finally {
+//       setTimeout(() => isMoving = false, 50)
+//     }
+//   });
+// };
+
+/**
+ * 手势实时双轴控制
+ * 手势X → J1旋转左右；手势Y → J2俯仰前后
+ * 纯关节增量控制，无逆解、无位姿换算，丝滑无奇异点
+ */
 const handleConnectGesture = async () => {
   stopAutoMove.value = false;
+  let isMoving = false;
 
-  // 柔性化参数，减小刚性冲击
-  const SMOOTH_FACTOR = 0.3;
-  const MIN_MOVE = 0.3;
-  const SERVO_PERIOD = 30;
-  const SERVO_T = 0.05;
-  const AHEADTIME = 80;
-  const GAIN = 200;        // 官方下限，柔性跟随，减小拽动冲击
-  const STEP_SCALE_X = 1.0;// X轴缩放比例
-  const STEP_SCALE_Z = 1.0;// Z轴缩放比例
-  const MAX_STEP_X = 5;    // X单帧最大位移
-  const MAX_STEP_Z = 5;    // Z单帧最大位移
+  // ==================== 配置参数
+  const SCALE_X = 0.5;             // X手势→J1度数灵敏度
+  const SCALE_Y = 0.5;             // Y手势→J2度数灵敏度
+  const SMOOTH_FACTOR = 0.15;      // 低滤波，响应快不抖动
+  const MIN_MOVE = 0.2;            // 最小移动死区，微小手势不触发运动
+  const COOLDOWN = 100;            // 指令发送间隔ms
 
-  const LIMIT = {
-    xMin: -160, xMax: 500,
-    yMin: 100, yMax: 600,
-    zMin: 200, zMax: 580,
-    rxMin: -180, rxMax: 180,
-    ryMin: -90, ryMax: 90,
-    rzMin: -180, rzMax: 180,
-  };
+  // ==================== 状态缓存
+  let baseJoints = null;
+  let lastX = 0;
+  let lastY = 0;
+  let lastSendTime = 0;
 
-  let lastDx = 0;   // X轴滤波缓存
-  let lastDy = 0;   // Z轴滤波缓存
-  let justPaused = false;
-  let basePose = null;
-  let servoTimer = null;
-  let servoRunning = false;
-  let latestTargetPose = null;
-  let xCurrent = 0;
-  let zCurrent = 0;
-  let lastSendStamp = 0;
-
-  await window.electronAPI.connectGesture("192.168.6.123",5000);
-  console.log("[手势] 手势TCP连接成功");
-
-  const stopServoLoop = () => {
-    console.log("[Servo] 执行停止循环，清空定时器与基准位");
-    servoRunning = false;
-    if (servoTimer) {
-      clearInterval(servoTimer);
-      servoTimer = null;
-    }
-    basePose = null;
-    latestTargetPose = null;
-    xCurrent = 0;
-    zCurrent = 0;
-    lastDx = 0;
-    lastDy = 0;
-    justPaused = false;
-    lastSendStamp = 0;
-  };
-
-  const cycleArgs = {
-    stopAutoMove,
-    stopServoLoop,
-    servoRunning,
-    latestTargetPose,
-    SERVO_T,
-    AHEADTIME,
-    GAIN,
-    sendRobotCmd: window.electronAPI.sendRobotCmd.bind(window.electronAPI)
-  };
+  await window.electronAPI.connectGesture("192.168.6.123", 5000);
 
   window.electronAPI.onGestureData(async (dataStr) => {
     try {
       const data = JSON.parse(dataStr);
-      if (data.is_open === true) {
-        stopServoLoop();
-        basePose = null;
-        return;
-      }
-      if (stopAutoMove.value) {
-        stopServoLoop();
-        return;
-      }
+      const now = Date.now();
 
-      // X、Y任一轴有效就持续运行
-      const absX = Math.abs(data.x ?? 0);
-      const absY = Math.abs(data.y ?? 0);
-      if (absX < MIN_MOVE && absY < MIN_MOVE) {
-        if (!justPaused && servoTimer) {
-          console.log("[手势] 手势静止，暂停Servo下发定时器");
-          justPaused = true;
-          clearInterval(servoTimer);
-          servoTimer = null;
-        }
-        return;
-      }
+      // 冷却节流+运动锁判断
+      if (now - lastSendTime < COOLDOWN) return;
+      if (isMoving || stopAutoMove.value) return;
 
-      if (justPaused) {
-        lastDx = data.x ?? 0;
-        lastDy = data.y;
-        justPaused = false;
-        if (!servoTimer) {
-          servoTimer = setInterval(() => sendServoPCycle(cycleArgs), SERVO_PERIOD);
-          console.log("[Servo] 定时器重建，持续下发指令");
-        }
-      }
+      // 手势一阶指数平滑滤波
+      const rawX = data.x;
+      const rawY = data.y;
+      const smoothX = lastX + (rawX - lastX) * SMOOTH_FACTOR;
+      const smoothY = lastY + (rawY - lastY) * SMOOTH_FACTOR;
+      lastX = smoothX;
+      lastY = smoothY;
 
-      // X轴滑动平均滤波
-      lastDx = lastDx + ((data.x ?? 0) - lastDx) * SMOOTH_FACTOR;
-      // Z轴原有滤波不变
-      lastDy = lastDy + (data.y - lastDy) * SMOOTH_FACTOR;
+      // 换算成关节角度增量（度）
+      const dJ1 = -smoothX * SCALE_X;
+      const dJ2 = -smoothY * SCALE_Y;
 
-      if (!basePose) {
-        console.log("[手势] 新拖动起始，同步获取机械臂实时位姿");
-        const currPose = await window.electronAPI.getRobotPose();
-        if (!currPose) {
-          console.error("[手势] 获取位姿失败");
+      // 双轴都小于死区则跳过发送
+      if (Math.abs(dJ1) < MIN_MOVE && Math.abs(dJ2) < MIN_MOVE) return;
+
+      isMoving = true;
+      lastSendTime = now;
+
+      // 首次抓取基准关节角度（仅一次）
+      if (!baseJoints) {
+        const joints = await window.electronAPI.getRobotAngle();
+        if (!joints || joints.length < 6) {
+          console.error("❌ 获取初始关节角度失败");
+          isMoving = false;
           return;
         }
-        basePose = { ...currPose };
-        xCurrent = basePose.x;
-        zCurrent = basePose.z;
-        servoRunning = true;
-        cycleArgs.servoRunning = servoRunning;
-        if (!servoTimer) {
-          servoTimer = setInterval(() => sendServoPCycle(cycleArgs), SERVO_PERIOD);
-          console.log("[Servo] 定时器创建完毕，持续下发指令");
-        }
+        baseJoints = [...joints];
+        console.log("✅ 基准关节初始化完成：", baseJoints);
+        isMoving = false;
+        return;
       }
 
-      // 节流对齐30ms下发周期
-      const now = Date.now();
-      if (now - lastSendStamp < SERVO_PERIOD) return;
-      lastSendStamp = now;
+      // 增量叠加：J1叠加X增量，J2叠加Y增量，其余关节保持不变
+      const targetJoints = baseJoints.map((val, idx) => {
+        if (idx === 0) return val + dJ1;
+        if (idx === 1) return val + dJ2;
+        return val;
+      });
 
-      // ========== X轴位移计算+限幅 ==========
-      let deltaX = lastDx * STEP_SCALE_X;
-      deltaX = Math.max(-MAX_STEP_X, Math.min(MAX_STEP_X, deltaX));
-      // X方向符号，按需 + / - 互换
-      xCurrent += deltaX;
-      // X硬限位
-      xCurrent = Math.max(LIMIT.xMin, Math.min(LIMIT.xMax, xCurrent));
+      // 关节角度限位校验
+      let withinBounds = true;
+      for (let i = 0; i < targetJoints.length; i++) {
+        const degMin = joints.value[i].min * 180 / Math.PI;
+        const degMax = joints.value[i].max * 180 / Math.PI;
+        if (targetJoints[i] < degMin || targetJoints[i] > degMax) {
+          console.warn(`⚠️ J${i + 1} 角度越限：${targetJoints[i].toFixed(2)}°`);
+          withinBounds = false;
+          break;
+        }
+      }
+      if (!withinBounds) {
+        isMoving = false;
+        return;
+      }
 
-      // ========== Z轴原有逻辑完全不动 ==========
-      let deltaZ = lastDy * STEP_SCALE_Z;
-      deltaZ = Math.max(-MAX_STEP_Z, Math.min(MAX_STEP_Z, deltaZ));
-      zCurrent -= deltaZ;
-      zCurrent = Math.max(LIMIT.zMin, Math.min(LIMIT.zMax, zCurrent));
+      // 组装MovJ关节运动指令
+      const jArr = targetJoints.map(v => v.toFixed(1));
+      const cmd = `MovJ(joint={${jArr.join(",")}},a=20,v=20)`;
+      const res = await window.electronAPI.sendRobotCmd(cmd);
 
-      const targetY = basePose.y;
-      const rx = basePose.rx;
-      const ry = basePose.ry;
-      const rz = basePose.rz;
-
-      latestTargetPose = {
-        x: xCurrent,
-        y: targetY,
-        z: zCurrent,
-        rx, ry, rz
-      };
-      cycleArgs.latestTargetPose = latestTargetPose;
-
-      console.log(
-        "手势x值:", lastDx, "X单帧位移:", deltaX, "当前X坐标:", xCurrent,
-        "手势y值:", lastDy, "Z单帧位移:", deltaZ, "当前Z坐标:", zCurrent
-      );
+      console.log("📤 双轴手势下发", {
+        dJ1: dJ1.toFixed(2),
+        dJ2: dJ2.toFixed(2),
+        targetJoints: jArr
+      });
+      console.log("🤖 机器人回复：", res);
 
     } catch (err) {
-      console.error("手势全局异常:", err);
-      stopServoLoop();
+      console.error("手势控制异常：", err);
+    } finally {
+      setTimeout(() => isMoving = false, 50);
     }
   });
 };
-
-
-//=====================================ServoP指令==================== 
-
 
 
 

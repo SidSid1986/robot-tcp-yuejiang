@@ -94,9 +94,9 @@ export default ({ mode }) => {
       minify: "terser",
       terserOptions: {
         compress: {
-          drop_console: true,
-          drop_debugger: true,
-          pure_funcs: ["console.log", "console.debug"],
+          drop_console: false,// 保留 console.log 等语句
+          drop_debugger: false,
+          // pure_funcs: ["console.log", "console.debug"],
         },
       },
       rollupOptions: {

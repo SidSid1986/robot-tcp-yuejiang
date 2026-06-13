@@ -50,12 +50,17 @@ const closeWindow = () => {
     customClass: "close-confirm",
     type: "warning",
   })
-    .then(() => {
+    .then(async () => {
       const loading = ElLoading.service({
         lock: true,
         text: "正在关机中",
         background: "rgba(216, 199, 229, 0.8)",
       });
+
+
+      // 断开连线，下使能
+      await window.electronAPI.disconnectRobot();
+      await window.electronAPI.disableRobot();
 
       // quitAll().then(() => {
       //   // window.electronAPI?.closeWindow();
@@ -90,6 +95,8 @@ onUnmounted(() => {
   // 正确移除监听
   if (removeMemoryListener) removeMemoryListener();
   if (removeFullscreenListener) removeFullscreenListener();
+  //断开连线，下使能
+
 });
 </script>
 

@@ -52,6 +52,13 @@
     ],
     "extraResources": [
       {
+        "from": "public/kr1",
+        "to": "kr1",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
         "from": "src/assets/music",
         "to": "assets/music",
         "filter": [

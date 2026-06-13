@@ -2,7 +2,7 @@
  * @Author: Sid Li
  * @Date: 2026-06-04 17:00:25
  * @LastEditors: Sid Li
- * @LastEditTime: 2026-06-09 16:40:02
+ * @LastEditTime: 2026-06-13 14:44:47
  * @Description: 越疆机器人 在线模式完整API + 手势TCP控制
  */
 const { contextBridge, ipcRenderer } = require("electron");
@@ -25,6 +25,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return () => ipcRenderer.removeAllListeners("fullscreen-status");
   },
 
+  // 获取资源路径
+  // 用于加载资源文件，如配置文件、模型文件等
+  getResourcesPath: () => ipcRenderer.invoke("app:get-resources-path"),
+
   // ========== 越疆机器人 TCP ==========
   connectRobot: (ip, port) => ipcRenderer.invoke("robot:connect", ip, port),
   sendRobotCmd: (cmd) => ipcRenderer.invoke("robot:send", cmd),
@@ -39,7 +43,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
   disableRobot: () => ipcRenderer.invoke("robot:disable"),
 
   // 停止运动
-  MoveJog: (axisID) => ipcRenderer.invoke("robot:moveJog", axisID),
+  /**
+   * 点动控制
+   * @param {string|Object} arg
+   *  1. 字符串：直接传 axisID，"" 代表停止
+   *  2. 对象：{axisID, coordtype?, user?, tool?}
+   */
+  MoveJog: (arg) => ipcRenderer.invoke("robot:moveJog", arg),
+
+
+  // 笛卡尔动态点位跟随指令下发
+  servoP: (x, y, z, rx, ry, rz, t, aheadtime, gain) =>
+    ipcRenderer.invoke("robot:servoP", x, y, z, rx, ry, rz, t, aheadtime, gain),
+
   // 设置TCP模式
   setTcpMode: () => ipcRenderer.invoke("robot:setTcpMode"),
   // 清除错误

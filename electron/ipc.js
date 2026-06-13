@@ -2,10 +2,10 @@
  * @Author: Sid Li
  * @Date: 2026-06-04 17:00:25
  * @LastEditors: Sid Li
- * @LastEditTime: 2026-06-09 13:49:18
+ * @LastEditTime: 2026-06-13 15:13:53
  * @Description: 远程控制模式（可发MoveJoint）+ 连接 + 使能 + 回原点 + 扫描 + 急停
  */
-const { ipcMain } = require("electron");
+const { ipcMain, app } = require("electron");
 const { getMainWindow } = require("./windowManager");
 const net = require("net");
 const os = require("os");
@@ -149,27 +149,56 @@ function registerIPC() {
   });
 
   // 越疆官方标准：点动 + 立即停止
-  ipcMain.handle("robot:moveJog", async (event, axisID = "") => {
+  ipcMain.handle("robot:moveJog", async (event, payload) => {
     if (!robotSocket || !robotConnected) {
       return { code: -1, msg: "未连接机器人" };
     }
 
     try {
-      let cmd;
-      if (axisID === "") {
-        cmd = "MoveJog()"; //   停止所有运动
-      } else {
-        cmd = `MoveJog(${axisID})`; // 点动
+      let cmdSegments = [];
+
+      // 场景1：向前兼容，直接传字符串 axisID（旧调用方式不变）
+      if (typeof payload === "string") {
+        const axisID = payload.trim();
+        if (axisID === "") {
+          // 空字符串 → MoveJog() 停止
+          cmdSegments = [];
+        } else {
+          cmdSegments.push(axisID);
+        }
+      }
+      // 场景2：传入对象，完整携带所有可选参数（标准正规用法）
+      else if (
+        payload &&
+        typeof payload === "object" &&
+        !Array.isArray(payload)
+      ) {
+        const { axisID, coordtype, user, tool } = payload;
+        if (!axisID || axisID.trim() === "") {
+          cmdSegments = [];
+        } else {
+          cmdSegments.push(axisID.trim());
+          if (coordtype !== undefined)
+            cmdSegments.push(`coordtype=${coordtype}`);
+          if (user !== undefined) cmdSegments.push(`user=${user}`);
+          if (tool !== undefined) cmdSegments.push(`tool=${tool}`);
+        }
       }
 
-      console.log("✅ 发送指令：", cmd);
+      // 拼接最终指令
+      const cmd = cmdSegments.length
+        ? `MoveJog(${cmdSegments.join(",")})`
+        : "MoveJog()";
+      console.log("✅ MoveJog 下发指令：", cmd);
       robotSocket.write(cmd + "\r\n");
-      return { code: 0, cmd: cmd };
+
+      return { code: 0, sendCmd: cmd };
     } catch (err) {
-      console.error("❌ MoveJog 失败：", err);
-      return { code: -1 };
+      console.error("❌ MoveJog 发送异常：", err.message);
+      return { code: -1, msg: err.message };
     }
   });
+
   // ==============================================
   // 发送自定义指令（MoveJ）
   // ==============================================
@@ -346,170 +375,185 @@ function registerIPC() {
     console.log(" 手势 TCP 已断开");
     return true;
   });
-}
 
-//StartDrag 机器人进入关节拖拽模式 立即指令
-ipcMain.handle("robot:startDrag", () => {
-  if (robotConnected) {
-    robotSocket.write("StartDrag()\r\n");
-  }
-});
-
-//StopDrag 机器人退出拖拽模式 立即指令
-ipcMain.handle("robot:stopDrag", () => {
-  if (robotConnected) {
-    robotSocket.write("StopDrag()\r\n");
-  }
-});
-
-// ==============================================
-// ✅ 获取当前末端位姿 (x,y,z,rx,ry,rz)
-// ==============================================
-ipcMain.handle("robot:getPose", async () => {
-  if (!robotSocket || !robotConnected) return null;
-
-  return new Promise((resolve) => {
-    let done = false;
-    const onData = (data) => {
-      const msg = data.toString().trim();
-      console.log("GetPose原始返回:", msg);
-      if (msg.startsWith("0,")) {
-        try {
-          // 越疆返回格式： 0,{x,y,z,rx,ry,rz},GetPose();
-          const match = msg.match(
-            /\{([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+)\}/,
-          );
-          if (match) {
-            const pose = {
-              x: parseFloat(match[1]),
-              y: parseFloat(match[2]),
-              z: parseFloat(match[3]),
-              rx: parseFloat(match[4]),
-              ry: parseFloat(match[5]),
-              rz: parseFloat(match[6]),
-            };
-            console.log("✅ 解析成功 当前位姿:", pose);
-            resolve(pose);
-            done = true;
-            robotSocket.off("data", onData);
-          }
-        } catch (e) {}
-      }
-    };
-    robotSocket.on("data", onData);
-    robotSocket.write("GetPose()\r\n");
-    setTimeout(() => {
-      if (!done) resolve(null);
-    }, 1000);
+  //
+  ipcMain.handle("app:get-resources-path", () => {
+    try {
+      // 打包环境用 process.resourcesPath，稳定不会抛异常
+      const resourcesPath = process.resourcesPath;
+      console.log("✅ [Electron Main] 返回 resources 路径：", resourcesPath);
+      return resourcesPath;
+    } catch (error) {
+      console.error("❌ [Electron Main] 获取 resources 路径失败：", error);
+      const fallbackPath = require("path").join(app.getAppPath(), "resources");
+      console.log("⚠️  [Electron Main] 使用降级路径：", fallbackPath);
+      return fallbackPath;
+    }
   });
-});
 
-// ==============================================
-// ✅ 逆解：位姿 → 关节角度 (最重要！)
-// ==============================================
-// 逆解运算：位姿 → 关节角度 【文档标准版】
-ipcMain.handle("robot:ikSolve", async (_, pose) => {
-  if (!robotSocket || !robotConnected) return null;
+  //StartDrag 机器人进入关节拖拽模式 立即指令
+  ipcMain.handle("robot:startDrag", () => {
+    if (robotConnected) {
+      robotSocket.write("StartDrag()\r\n");
+    }
+  });
 
-  const { x, y, z, rx, ry, rz } = pose;
+  //StopDrag 机器人退出拖拽模式 立即指令
+  ipcMain.handle("robot:stopDrag", () => {
+    if (robotConnected) {
+      robotSocket.write("StopDrag()\r\n");
+    }
+  });
 
   // ==============================================
-  // ✅ 官方文档正确格式！！！
+  // ✅ 获取当前末端位姿 (x,y,z,rx,ry,rz)
   // ==============================================
-  const cmd = `InverseKin(${x},${y},${z},${rx},${ry},${rz})\r\n`;
+  ipcMain.handle("robot:getPose", async () => {
+    if (!robotSocket || !robotConnected) return null;
 
-  return new Promise((resolve) => {
-    let done = false;
-    const onData = (data) => {
-      const msg = data.toString().trim();
-      console.log("ik返回:", msg);
-
-      // 失败
-      if (msg.startsWith("-10000")) {
-        console.error("❌ 逆解失败");
-        resolve(null);
-        done = true;
-        robotSocket.off("data", onData);
-        return;
-      }
-
-      // 成功
-      if (msg.startsWith("0,")) {
-        try {
-          const match = msg.match(
-            /\{([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+)\}/,
-          );
-          if (match) {
-            const joints = [
-              parseFloat(match[1]),
-              parseFloat(match[2]),
-              parseFloat(match[3]),
-              parseFloat(match[4]),
-              parseFloat(match[5]),
-              parseFloat(match[6]),
-            ];
-            console.log("✅ 逆解成功:", joints);
-            resolve(joints);
-          }
-        } catch (e) {
-          resolve(null);
-        }
-        done = true;
-        robotSocket.off("data", onData);
-      }
-    };
-
-    robotSocket.on("data", onData);
-    robotSocket.write(cmd);
-
-    setTimeout(() => {
-      if (!done) resolve(null);
-    }, 1000);
-  });
-});
-
-
-
-// ==============================================
-// ✅ 获取当前关节角度（度数）GetAngle()
-// ==============================================
-ipcMain.handle("robot:getAngle", async () => {
-  if (!robotSocket || !robotConnected) return null;
-
-  return new Promise((resolve) => {
-    let done = false;
-    const onData = (data) => {
-      const msg = data.toString().trim();
-      console.log("GetAngle原始返回:", msg);
-
-      // 成功返回格式：0,{0.0,0.0,-90.0,0.0,90.0,0.0},GetAngle()
-      if (msg.startsWith("0,")) {
-        try {
-          const match = msg.match(/\{([^}]+)\}/);
-          if (match) {
-            // 分割成6个关节角度
-            const joints = match[1].split(',').map(v => parseFloat(v.trim()));
-            
-            if (joints.length === 6) {
-              console.log("✅ 解析成功 当前关节(度):", joints);
-              resolve(joints); // 返回 [J1,J2,J3,J4,J5,J6]
+    return new Promise((resolve) => {
+      let done = false;
+      const onData = (data) => {
+        const msg = data.toString().trim();
+        console.log("GetPose原始返回:", msg);
+        if (msg.startsWith("0,")) {
+          try {
+            // 越疆返回格式： 0,{x,y,z,rx,ry,rz},GetPose();
+            const match = msg.match(
+              /\{([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+)\}/,
+            );
+            if (match) {
+              const pose = {
+                x: parseFloat(match[1]),
+                y: parseFloat(match[2]),
+                z: parseFloat(match[3]),
+                rx: parseFloat(match[4]),
+                ry: parseFloat(match[5]),
+                rz: parseFloat(match[6]),
+              };
+              console.log("✅ 解析成功 当前位姿:", pose);
+              resolve(pose);
               done = true;
               robotSocket.off("data", onData);
-              return;
             }
-          }
-        } catch (e) {}
-      }
-    };
-
-    robotSocket.on("data", onData);
-    robotSocket.write("GetAngle()\r\n");
-
-    setTimeout(() => {
-      if (!done) resolve(null);
-    }, 1000);
+          } catch (e) {}
+        }
+      };
+      robotSocket.on("data", onData);
+      robotSocket.write("GetPose()\r\n");
+      setTimeout(() => {
+        if (!done) resolve(null);
+      }, 1000);
+    });
   });
-});
+
+  // ==============================================
+  // ✅ 逆解：位姿 → 关节角度 (最重要！)
+  // ==============================================
+  // 逆解运算：位姿 → 关节角度 【文档标准版】
+  ipcMain.handle("robot:ikSolve", async (_, pose) => {
+    if (!robotSocket || !robotConnected) return null;
+
+    const { x, y, z, rx, ry, rz } = pose;
+
+    // ==============================================
+    // ✅ 官方文档正确格式！！！
+    // ==============================================
+    const cmd = `InverseKin(${x},${y},${z},${rx},${ry},${rz})\r\n`;
+
+    return new Promise((resolve) => {
+      let done = false;
+      const onData = (data) => {
+        const msg = data.toString().trim();
+        console.log("ik返回:", msg);
+
+        // 失败
+        if (msg.startsWith("-10000")) {
+          console.error("❌ 逆解失败");
+          resolve(null);
+          done = true;
+          robotSocket.off("data", onData);
+          return;
+        }
+
+        // 成功
+        if (msg.startsWith("0,")) {
+          try {
+            const match = msg.match(
+              /\{([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+),([\d\.\-]+)\}/,
+            );
+            if (match) {
+              const joints = [
+                parseFloat(match[1]),
+                parseFloat(match[2]),
+                parseFloat(match[3]),
+                parseFloat(match[4]),
+                parseFloat(match[5]),
+                parseFloat(match[6]),
+              ];
+              console.log("✅ 逆解成功:", joints);
+              resolve(joints);
+            }
+          } catch (e) {
+            resolve(null);
+          }
+          done = true;
+          robotSocket.off("data", onData);
+        }
+      };
+
+      robotSocket.on("data", onData);
+      robotSocket.write(cmd);
+
+      setTimeout(() => {
+        if (!done) resolve(null);
+      }, 1000);
+    });
+  });
+
+  // ==============================================
+  // ✅ 获取当前关节角度（度数）GetAngle()
+  // ==============================================
+  ipcMain.handle("robot:getAngle", async () => {
+    if (!robotSocket || !robotConnected) return null;
+
+    return new Promise((resolve) => {
+      let done = false;
+      const onData = (data) => {
+        const msg = data.toString().trim();
+        console.log("GetAngle原始返回:", msg);
+
+        // 成功返回格式：0,{0.0,0.0,-90.0,0.0,90.0,0.0},GetAngle()
+        if (msg.startsWith("0,")) {
+          try {
+            const match = msg.match(/\{([^}]+)\}/);
+            if (match) {
+              // 分割成6个关节角度
+              const joints = match[1]
+                .split(",")
+                .map((v) => parseFloat(v.trim()));
+
+              if (joints.length === 6) {
+                console.log("✅ 解析成功 当前关节(度):", joints);
+                resolve(joints); // 返回 [J1,J2,J3,J4,J5,J6]
+                done = true;
+                robotSocket.off("data", onData);
+                return;
+              }
+            }
+          } catch (e) {}
+        }
+      };
+
+      robotSocket.on("data", onData);
+      robotSocket.write("GetAngle()\r\n");
+
+      setTimeout(() => {
+        if (!done) resolve(null);
+      }, 1000);
+    });
+  });
+}
 
 function startFeedback(ip) {
   if (feedbackSocket) feedbackSocket.destroy();
