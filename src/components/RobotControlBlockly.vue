@@ -1,6 +1,6 @@
 <template>
   <div class="control-panel">
-    <!-- 👇 这里改成了 加减号精细控制，去掉了滑动条 -->
+    <!--  加减号精细控制，去掉了滑动条 -->
     <div v-for="(joint, index) in joints" :key="index" class="slider-container">
       <label>{{ joint.label }}</label>
 
@@ -178,7 +178,7 @@ const sendMoveToRobot = async (jointValuesRad) => {
 
 
 // ==============================================
-// ✅ 新：发送 位姿Pose 给机器人（直线运动 MovL）
+//  发送 位姿Pose 给机器人（直线运动 MovL）
 // ==============================================
 const sendMovePoseToRobot = async (pose) => {
   if (!window.electronAPI) return
@@ -356,9 +356,7 @@ const stopRobotMove = async () => {
 
 //=====================================ServoP指令==================== 
 
-
-
-async function sendServoPCycle(args) {
+const sendServoPCycle = async (args) => {
   const { stopAutoMove, stopServoLoop, servoRunning, latestTargetPose, SERVO_T, AHEADTIME, GAIN, sendRobotCmd } = args;
   if (stopAutoMove.value) {
     stopServoLoop();
@@ -392,17 +390,19 @@ async function sendServoPCycle(args) {
 const handleConnectGesture = async () => {
   stopAutoMove.value = false;
 
-  // 柔性化参数，减小刚性冲击
-  const SMOOTH_FACTOR = 0.3;
-  const MIN_MOVE = 0.3;
-  const SERVO_PERIOD = 30;
+  // ========== 柔性参数 ==========
+  const SMOOTH_FACTOR = 0.35;
+  const MIN_MOVE = 0.12;
+  const SERVO_PERIOD = 30;       // 固定下发周期，绝对均匀
   const SERVO_T = 0.05;
   const AHEADTIME = 80;
-  const GAIN = 200;        // 官方下限，柔性跟随，减小拽动冲击
-  const STEP_SCALE_X = 1.0;// X轴缩放比例
-  const STEP_SCALE_Z = 1.0;// Z轴缩放比例
-  const MAX_STEP_X = 5;    // X单帧最大位移
-  const MAX_STEP_Z = 5;    // Z单帧最大位移
+  const GAIN = 200;
+  const STEP_SCALE_X = 1.0;
+  const STEP_SCALE_Z = 1.0;
+  const MAX_SPEED_X = 6.0;       // 最大速度 mm/帧
+  const MAX_SPEED_Z = 6.0;
+  const ACCEL_X = 1.0;           // 加速度 mm/帧²，越大起步越快
+  const ACCEL_Z = 1.0;
 
   const LIMIT = {
     xMin: -160, xMax: 500,
@@ -413,35 +413,40 @@ const handleConnectGesture = async () => {
     rzMin: -180, rzMax: 180,
   };
 
-  let lastDx = 0;   // X轴滤波缓存
-  let lastDy = 0;   // Z轴滤波缓存
-  let justPaused = false;
+  // ========== 状态变量 ==========
   let basePose = null;
   let servoTimer = null;
   let servoRunning = false;
   let latestTargetPose = null;
+
+  // 坐标状态
   let xCurrent = 0;
   let zCurrent = 0;
-  let lastSendStamp = 0;
+  // 当前实际速度（加减速平滑用）
+  let currVelX = 0;
+  let currVelZ = 0;
+  // 滤波后期望速度输入
+  let targetVelX = 0;
+  let targetVelZ = 0;
 
-  await window.electronAPI.connectGesture("192.168.6.123",5000);
+  let lastSentX = null;
+  let lastSentZ = null;
+
+  await window.electronAPI.connectGesture("192.168.6.123", 5000);
   console.log("[手势] 手势TCP连接成功");
 
   const stopServoLoop = () => {
-    console.log("[Servo] 执行停止循环，清空定时器与基准位");
+    console.log("[Servo] 停止手势随动，保留当前坐标");
     servoRunning = false;
+    // 速度归零，下次启动从0加速，无冲击
+    currVelX = 0;
+    currVelZ = 0;
+    targetVelX = 0;
+    targetVelZ = 0;
     if (servoTimer) {
       clearInterval(servoTimer);
       servoTimer = null;
     }
-    basePose = null;
-    latestTargetPose = null;
-    xCurrent = 0;
-    zCurrent = 0;
-    lastDx = 0;
-    lastDy = 0;
-    justPaused = false;
-    lastSendStamp = 0;
   };
 
   const cycleArgs = {
@@ -455,12 +460,60 @@ const handleConnectGesture = async () => {
     sendRobotCmd: window.electronAPI.sendRobotCmd.bind(window.electronAPI)
   };
 
+  // ========== 核心：固定时钟匀速插补下发 ==========
+  const servoTick = () => {
+    if (!servoRunning || !basePose) return;
+
+    // 1. 速度平滑逼近：按加速度逐步追平目标速度，正负对称
+    if (currVelX < targetVelX) {
+      currVelX = Math.min(currVelX + ACCEL_X, targetVelX);
+    } else if (currVelX > targetVelX) {
+      currVelX = Math.max(currVelX - ACCEL_X, targetVelX);
+    }
+    if (currVelZ < targetVelZ) {
+      currVelZ = Math.min(currVelZ + ACCEL_Z, targetVelZ);
+    } else if (currVelZ > targetVelZ) {
+      currVelZ = Math.max(currVelZ - ACCEL_Z, targetVelZ);
+    }
+
+    // 2. 计算本帧位移，更新坐标
+    xCurrent += currVelX;
+    zCurrent -= currVelZ; // 保持你原有方向映射：y正Z上升，y负Z下降
+
+    // 3. 硬限位
+    xCurrent = Math.max(LIMIT.xMin, Math.min(LIMIT.xMax, xCurrent));
+    zCurrent = Math.max(LIMIT.zMin, Math.min(LIMIT.zMax, zCurrent));
+
+    // 4. 重复点位过滤，极小变化不发指令
+    if (
+      lastSentX !== null &&
+      Math.abs(xCurrent - lastSentX) < 0.01 &&
+      Math.abs(zCurrent - lastSentZ) < 0.01
+    ) {
+      return;
+    }
+
+    const targetY = basePose.y;
+    const rx = basePose.rx;
+    const ry = basePose.ry;
+    const rz = basePose.rz;
+
+    latestTargetPose = { x: xCurrent, y: targetY, z: zCurrent, rx, ry, rz };
+    cycleArgs.latestTargetPose = latestTargetPose;
+
+    lastSentX = xCurrent;
+    lastSentZ = zCurrent;
+
+    // 5. 固定频率下发，时序绝对均匀
+    sendServoPCycle(cycleArgs);
+  };
+
+  // ========== 手势数据回调：只更新期望速度 ==========
   window.electronAPI.onGestureData(async (dataStr) => {
     try {
       const data = JSON.parse(dataStr);
       if (data.is_open === true) {
         stopServoLoop();
-        basePose = null;
         return;
       }
       if (stopAutoMove.value) {
@@ -468,36 +521,22 @@ const handleConnectGesture = async () => {
         return;
       }
 
-      // X、Y任一轴有效就持续运行
-      const absX = Math.abs(data.x ?? 0);
-      const absY = Math.abs(data.y ?? 0);
+      const rawX = data.x ?? 0;
+      const rawY = data.y ?? 0;
+      const absX = Math.abs(rawX);
+      const absY = Math.abs(rawY);
+
+      // 死区判断
       if (absX < MIN_MOVE && absY < MIN_MOVE) {
-        if (!justPaused && servoTimer) {
-          console.log("[手势] 手势静止，暂停Servo下发定时器");
-          justPaused = true;
-          clearInterval(servoTimer);
-          servoTimer = null;
-        }
+        // 目标速度设为0，让机械臂平滑减速到停止，不硬切
+        targetVelX = 0;
+        targetVelZ = 0;
         return;
       }
 
-      if (justPaused) {
-        lastDx = data.x ?? 0;
-        lastDy = data.y;
-        justPaused = false;
-        if (!servoTimer) {
-          servoTimer = setInterval(() => sendServoPCycle(cycleArgs), SERVO_PERIOD);
-          console.log("[Servo] 定时器重建，持续下发指令");
-        }
-      }
-
-      // X轴滑动平均滤波
-      lastDx = lastDx + ((data.x ?? 0) - lastDx) * SMOOTH_FACTOR;
-      // Z轴原有滤波不变
-      lastDy = lastDy + (data.y - lastDy) * SMOOTH_FACTOR;
-
+      // 首次启动抓基准位+启定时器，只执行一次
       if (!basePose) {
-        console.log("[手势] 新拖动起始，同步获取机械臂实时位姿");
+        console.log("[手势] 首次启动，获取初始位姿");
         const currPose = await window.electronAPI.getRobotPose();
         if (!currPose) {
           console.error("[手势] 获取位姿失败");
@@ -506,50 +545,27 @@ const handleConnectGesture = async () => {
         basePose = { ...currPose };
         xCurrent = basePose.x;
         zCurrent = basePose.z;
+        lastSentX = xCurrent;
+        lastSentZ = zCurrent;
+      }
+
+      // 滑动滤波
+      targetVelX = targetVelX + (rawX * STEP_SCALE_X - targetVelX) * SMOOTH_FACTOR;
+      targetVelZ = targetVelZ + (rawY * STEP_SCALE_Z - targetVelZ) * SMOOTH_FACTOR;
+
+      // 最大速度限幅
+      targetVelX = Math.max(-MAX_SPEED_X, Math.min(MAX_SPEED_X, targetVelX));
+      targetVelZ = Math.max(-MAX_SPEED_Z, Math.min(MAX_SPEED_Z, targetVelZ));
+
+      // 启动运行状态与定时器
+      if (!servoRunning) {
         servoRunning = true;
         cycleArgs.servoRunning = servoRunning;
         if (!servoTimer) {
-          servoTimer = setInterval(() => sendServoPCycle(cycleArgs), SERVO_PERIOD);
-          console.log("[Servo] 定时器创建完毕，持续下发指令");
+          servoTimer = setInterval(servoTick, SERVO_PERIOD);
+          console.log("[Servo] 匀速插补定时器启动");
         }
       }
-
-      // 节流对齐30ms下发周期
-      const now = Date.now();
-      if (now - lastSendStamp < SERVO_PERIOD) return;
-      lastSendStamp = now;
-
-      // ========== X轴位移计算+限幅 ==========
-      let deltaX = lastDx * STEP_SCALE_X;
-      deltaX = Math.max(-MAX_STEP_X, Math.min(MAX_STEP_X, deltaX));
-      // X方向符号，按需 + / - 互换
-      xCurrent += deltaX;
-      // X硬限位
-      xCurrent = Math.max(LIMIT.xMin, Math.min(LIMIT.xMax, xCurrent));
-
-      // ========== Z轴原有逻辑完全不动 ==========
-      let deltaZ = lastDy * STEP_SCALE_Z;
-      deltaZ = Math.max(-MAX_STEP_Z, Math.min(MAX_STEP_Z, deltaZ));
-      zCurrent -= deltaZ;
-      zCurrent = Math.max(LIMIT.zMin, Math.min(LIMIT.zMax, zCurrent));
-
-      const targetY = basePose.y;
-      const rx = basePose.rx;
-      const ry = basePose.ry;
-      const rz = basePose.rz;
-
-      latestTargetPose = {
-        x: xCurrent,
-        y: targetY,
-        z: zCurrent,
-        rx, ry, rz
-      };
-      cycleArgs.latestTargetPose = latestTargetPose;
-
-      console.log(
-        "手势x值:", lastDx, "X单帧位移:", deltaX, "当前X坐标:", xCurrent,
-        "手势y值:", lastDy, "Z单帧位移:", deltaZ, "当前Z坐标:", zCurrent
-      );
 
     } catch (err) {
       console.error("手势全局异常:", err);
@@ -557,6 +573,175 @@ const handleConnectGesture = async () => {
     }
   });
 };
+
+// const handleConnectGesture = async () => {
+//   stopAutoMove.value = false;
+
+//   // 柔性化参数，减小刚性冲击
+//   const SMOOTH_FACTOR = 0.3;
+//   const MIN_MOVE = 0.3;
+//   const SERVO_PERIOD = 30;
+//   const SERVO_T = 0.05;
+//   const AHEADTIME = 80;
+//   const GAIN = 200;        // 官方下限，柔性跟随，减小拽动冲击
+//   const STEP_SCALE_X = 1.0;// X轴缩放比例
+//   const STEP_SCALE_Z = 1.0;// Z轴缩放比例
+//   const MAX_STEP_X = 5;    // X单帧最大位移
+//   const MAX_STEP_Z = 5;    // Z单帧最大位移
+
+//   const LIMIT = {
+//     xMin: -160, xMax: 500,
+//     yMin: 100, yMax: 600,
+//     zMin: 200, zMax: 580,
+//     rxMin: -180, rxMax: 180,
+//     ryMin: -90, ryMax: 90,
+//     rzMin: -180, rzMax: 180,
+//   };
+
+//   let lastDx = 0;   // X轴滤波缓存
+//   let lastDy = 0;   // Z轴滤波缓存
+//   let justPaused = false;
+//   let basePose = null;
+//   let servoTimer = null;
+//   let servoRunning = false;
+//   let latestTargetPose = null;
+//   let xCurrent = 0;
+//   let zCurrent = 0;
+//   let lastSendStamp = 0;
+
+//   await window.electronAPI.connectGesture("192.168.6.123",5000);
+//   console.log("[手势] 手势TCP连接成功");
+
+//   const stopServoLoop = () => {
+//     console.log("[Servo] 执行停止循环，清空定时器与基准位");
+//     servoRunning = false;
+//     if (servoTimer) {
+//       clearInterval(servoTimer);
+//       servoTimer = null;
+//     }
+//     basePose = null;
+//     latestTargetPose = null;
+//     xCurrent = 0;
+//     zCurrent = 0;
+//     lastDx = 0;
+//     lastDy = 0;
+//     justPaused = false;
+//     lastSendStamp = 0;
+//   };
+
+//   const cycleArgs = {
+//     stopAutoMove,
+//     stopServoLoop,
+//     servoRunning,
+//     latestTargetPose,
+//     SERVO_T,
+//     AHEADTIME,
+//     GAIN,
+//     sendRobotCmd: window.electronAPI.sendRobotCmd.bind(window.electronAPI)
+//   };
+
+//   window.electronAPI.onGestureData(async (dataStr) => {
+//     try {
+//       const data = JSON.parse(dataStr);
+//       if (data.is_open === true) {
+//         stopServoLoop();
+//         basePose = null;
+//         return;
+//       }
+//       if (stopAutoMove.value) {
+//         stopServoLoop();
+//         return;
+//       }
+
+//       // X、Y任一轴有效就持续运行
+//       const absX = Math.abs(data.x ?? 0);
+//       const absY = Math.abs(data.y ?? 0);
+//       if (absX < MIN_MOVE && absY < MIN_MOVE) {
+//         if (!justPaused && servoTimer) {
+//           console.log("[手势] 手势静止，暂停Servo下发定时器");
+//           justPaused = true;
+//           clearInterval(servoTimer);
+//           servoTimer = null;
+//         }
+//         return;
+//       }
+
+//       if (justPaused) {
+//         lastDx = data.x ?? 0;
+//         lastDy = data.y;
+//         justPaused = false;
+//         if (!servoTimer) {
+//           servoTimer = setInterval(() => sendServoPCycle(cycleArgs), SERVO_PERIOD);
+//           console.log("[Servo] 定时器重建，持续下发指令");
+//         }
+//       }
+
+//       // X轴滑动平均滤波
+//       lastDx = lastDx + ((data.x ?? 0) - lastDx) * SMOOTH_FACTOR;
+//       // Z轴原有滤波不变
+//       lastDy = lastDy + (data.y - lastDy) * SMOOTH_FACTOR;
+
+//       if (!basePose) {
+//         console.log("[手势] 新拖动起始，同步获取机械臂实时位姿");
+//         const currPose = await window.electronAPI.getRobotPose();
+//         if (!currPose) {
+//           console.error("[手势] 获取位姿失败");
+//           return;
+//         }
+//         basePose = { ...currPose };
+//         xCurrent = basePose.x;
+//         zCurrent = basePose.z;
+//         servoRunning = true;
+//         cycleArgs.servoRunning = servoRunning;
+//         if (!servoTimer) {
+//           servoTimer = setInterval(() => sendServoPCycle(cycleArgs), SERVO_PERIOD);
+//           console.log("[Servo] 定时器创建完毕，持续下发指令");
+//         }
+//       }
+
+//       // 节流对齐30ms下发周期
+//       const now = Date.now();
+//       if (now - lastSendStamp < SERVO_PERIOD) return;
+//       lastSendStamp = now;
+
+//       // ========== X轴位移计算+限幅 ==========
+//       let deltaX = lastDx * STEP_SCALE_X;
+//       deltaX = Math.max(-MAX_STEP_X, Math.min(MAX_STEP_X, deltaX));
+//       // X方向符号，按需 + / - 互换
+//       xCurrent += deltaX;
+//       // X硬限位
+//       xCurrent = Math.max(LIMIT.xMin, Math.min(LIMIT.xMax, xCurrent));
+
+//       // ========== Z轴原有逻辑完全不动 ==========
+//       let deltaZ = lastDy * STEP_SCALE_Z;
+//       deltaZ = Math.max(-MAX_STEP_Z, Math.min(MAX_STEP_Z, deltaZ));
+//       zCurrent -= deltaZ;
+//       zCurrent = Math.max(LIMIT.zMin, Math.min(LIMIT.zMax, zCurrent));
+
+//       const targetY = basePose.y;
+//       const rx = basePose.rx;
+//       const ry = basePose.ry;
+//       const rz = basePose.rz;
+
+//       latestTargetPose = {
+//         x: xCurrent,
+//         y: targetY,
+//         z: zCurrent,
+//         rx, ry, rz
+//       };
+//       cycleArgs.latestTargetPose = latestTargetPose;
+
+//       console.log(
+//         "手势x值:", lastDx, "X单帧位移:", deltaX, "当前X坐标:", xCurrent,
+//         "手势y值:", lastDy, "Z单帧位移:", deltaZ, "当前Z坐标:", zCurrent
+//       );
+
+//     } catch (err) {
+//       console.error("手势全局异常:", err);
+//       stopServoLoop();
+//     }
+//   });
+// };
 
 
 //=====================================ServoP指令==================== 
@@ -677,8 +862,6 @@ const handleMoveRight = () => {
 
   move();
 };
-
-
 
 // 手势断断开
 const handleDisconnectGesture = () => {
